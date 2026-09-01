@@ -1,0 +1,15 @@
+name: publish-api-dev
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+    ports:
+      - "8080:8080"
+    volumes:
+      # Bind-mount the project for live reload during development
+      - ../:/app
