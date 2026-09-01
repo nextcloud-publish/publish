@@ -13,3 +13,7 @@
 /phpunit.xml
 /.phpunit.cache/
 ###< phpunit/phpunit ###
+
+# RabbitMQ dev data (bind-mounted by docker/compose.dev.yaml); keep the dir, drop the contents
+/docker/rabbitMQ-data/*
+!/docker/rabbitMQ-data/.gitkeep
