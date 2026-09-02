@@ -9,6 +9,7 @@ services:
       APP_ENV: dev
       APP_DEBUG: "1"
       AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      AMQP_HEARTBEAT: "10"          # match heartbeat in rabbitmq-config/rabbitmq.conf
     ports:
       - "8080:8080"
     volumes:
