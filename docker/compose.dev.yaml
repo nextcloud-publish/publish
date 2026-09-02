@@ -8,8 +8,29 @@ services:
     environment:
       APP_ENV: dev
       APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      AMQP_HEARTBEAT: "10"          # match heartbeat in rabbitmq-config/rabbitmq.conf
     ports:
       - "8080:8080"
     volumes:
       # Bind-mount the project for live reload during development
       - ../:/app
+    depends_on:
+      - rabbitmq
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: rabbitmq            # pin node identity so a recreate keeps its data
+    # No RABBITMQ_DEFAULT_USER/PASS: the `app` user, vhost and permissions are
+    # created from rabbitmq-config/definitions.json, which the broker imports at boot
+    # (load_definitions in rabbitmq.conf). Importing users makes the env-var
+    # default user creation a no-op anyway.
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"   # container clock; override via .env or shell
+    volumes:
+      - ./rabbitMQ-data:/var/lib/rabbitmq
+      - ./rabbitmq-config/rabbitmq.conf:/etc/rabbitmq/conf.d/20-custom.conf:ro
+      - ./rabbitmq-config/definitions.json:/etc/rabbitmq/definitions.json:ro
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP, loopback only: for host-side tooling
+      - "127.0.0.1:15672:15672"   # management UI, loopback only

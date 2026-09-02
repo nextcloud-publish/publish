@@ -1,0 +1,46 @@
+{
+  "rabbit_version": "4.0.0",
+  "comment": "Minimum working topology for the publish service: ONE pending-builds queue and nothing else. This file is the SINGLE SOURCE OF TRUTH -- RabbitMQ imports it at boot (load_definitions in rabbitmq.conf), so the application must never declare topology itself. There are deliberately no exchanges: publishers use the default exchange with the routing key set to the queue name (basic_publish($msg, '', 'q.builds')). This is a starting point, not the final topology -- results, dead-lettering and unrouted-message handling are expected to arrive later. Queue and exchange arguments are IMMUTABLE once created: a re-import silently keeps the existing definition, so any change here needs the broker recreated with a wiped docker/rabbitMQ-data.",
+
+  "users": [
+    {
+      "name": "app",
+      "password_hash": "fB5bAiGLAUvRDzV6NFoodcnOx4CaaFxTcbBJ7x/hd12HQuVO",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": ["administrator"]
+    }
+  ],
+
+  "vhosts": [
+    { "name": "/" }
+  ],
+
+  "permissions": [
+    {
+      "user": "app",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+
+  "policies": [],
+  "parameters": [],
+  "global_parameters": [],
+  "topic_permissions": [],
+
+  "exchanges": [],
+
+  "queues": [
+    {
+      "name": "q.builds",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum" }
+    }
+  ],
+
+  "bindings": []
+}
