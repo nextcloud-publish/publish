@@ -21,3 +21,11 @@ services:
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
+
+    App\Storage\JobWorkspace:
+        arguments:
+            # No default on purpose. This has to be the same directory ssg-worker
+            # reads from, so a missing variable must fail loudly rather than send
+            # jobs to a second location the worker never looks at. Set in
+            # docker/compose.dev.yaml next to the volume mount it has to match.
+            $baseDir: '%env(JOB_STORAGE_DIR)%'
