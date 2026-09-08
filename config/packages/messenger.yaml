@@ -1,0 +1,66 @@
+# see https://symfony.com/doc/current/messenger.html
+framework:
+    messenger:
+        transports:
+            builds:
+                # Same variable the whole stack already uses, and the same one
+                # ssg-worker reads -- deliberately not Flex's
+                # MESSENGER_TRANSPORT_DSN, so the compose files stay untouched
+                # and the two services cannot drift apart.
+                #
+                # No default in .env, on purpose: an unset DSN is a broken
+                # deployment, and inventing one only turns that into a confusing
+                # connection error against a host nobody configured.
+                dsn: '%env(AMQP_DSN)%'
+
+                # NOT the framework default. That one is
+                # messenger.transport.native_php_serializer, i.e. PHP
+                # serialize(), which would weld the wire format to this app's
+                # class names and make the body unreadable in the management UI.
+                # This queue is a contract with a separate deployable, so it
+                # carries JSON.
+                serializer: messenger.transport.symfony_serializer
+
+                options:
+                    # The broker imports its whole topology from
+                    # docker/rabbitmq-config/definitions.json at boot and owns
+                    # it. Left enabled, Messenger would try to declare an
+                    # exchange, a queue and a binding on every publish and be
+                    # refused -- q.builds already exists as a quorum queue and
+                    # its arguments are immutable.
+                    auto_setup: false
+
+                    # Publisher confirms. Without a value here the transport
+                    # does not wait for a confirmation at all, and a broker
+                    # crash between accepting the publish and flushing it would
+                    # silently lose a job the API already answered 202 for.
+                    # 5s matches the wait_for_pending_acks(5.0) this replaces.
+                    confirm_timeout: 5
+
+                    # Must match the broker's heartbeat in
+                    # rabbitmq-config/rabbitmq.conf, or a quiet socket looks dead.
+                    heartbeat: '%env(int:AMQP_HEARTBEAT)%'
+
+                    exchange:
+                        # definitions.json defines no exchanges. The empty name
+                        # is the default exchange, where the routing key is
+                        # taken as a queue name and the message is delivered
+                        # straight to it -- the same thing
+                        # basic_publish($msg, '', 'q.builds') did before.
+                        name: ''
+                        default_publish_routing_key: q.builds
+
+        routing:
+            # No handler exists here; routing the message to a transport is what
+            # makes dispatch() send it to the broker instead of handling it.
+            App\Message\BuildJob: builds
+
+when@test:
+    framework:
+        messenger:
+            transports:
+                # No broker in tests, and AMQP_DSN is never resolved. Tests
+                # assert on what landed in this transport instead of mocking the
+                # bus, which is what lets the 202 path be covered through the
+                # kernel at all.
+                builds: 'in-memory://'

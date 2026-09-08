@@ -4,15 +4,16 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
-use App\Messaging\BuildQueue;
+use App\Message\BuildJob;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Attribute\Route;
 
 final class BuildController
 {
-    public function __construct(private readonly BuildQueue $buildQueue)
+    public function __construct(private readonly MessageBusInterface $bus)
     {
     }
 
@@ -44,22 +45,28 @@ final class BuildController
         // callback_status_url for the service to report back on.
         $buildId = bin2hex(random_bytes(8));
 
-        // Copy only allow-listed keys, so extra client fields never reach the queue.
-        $build = [
-            'build_id' => $buildId,
-            'static_site_id' => $payload['static_site_id'],
-            'slug' => $payload['slug'],
-            'content_download_url' => $payload['content_download_url'],
-            'callback_status_url' => $payload['callback_status_url'],
-            'created_at' => (new \DateTimeImmutable('now'))->format(\DateTimeInterface::ATOM),
-        ];
+        // Naming the fields explicitly is what keeps extra client fields out of
+        // the queue -- BuildJob's constructor now enforces the allow-list.
+        $build = new BuildJob(
+            build_id: $buildId,
+            static_site_id: $payload['static_site_id'],
+            slug: $payload['slug'],
+            content_download_url: $payload['content_download_url'],
+            callback_status_url: $payload['callback_status_url'],
+            created_at: (new \DateTimeImmutable('now'))->format(\DateTimeInterface::ATOM),
+        );
 
         try {
-            $this->buildQueue->enqueue($build);
+            // BuildJob is routed to the `builds` transport, so this publishes to
+            // the broker and blocks until it confirms (see confirm_timeout in
+            // config/packages/messenger.yaml) rather than handling anything here.
+            $this->bus->dispatch($build);
         } catch (\Throwable $e) {
             // Anything went wrong reaching the broker (including an unset AMQP_DSN):
             // report it and do NOT return 202, so the caller knows the build was not
-            // enqueued.
+            // enqueued. Deliberately broader than Messenger's TransportException so
+            // that a missing env var or a serialization failure cannot become a 202
+            // either.
             return new JsonResponse(
                 ['status' => 'error', 'error' => 'could not enqueue build'],
                 Response::HTTP_SERVICE_UNAVAILABLE,

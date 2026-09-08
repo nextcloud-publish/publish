@@ -5,18 +5,21 @@ declare(strict_types=1);
 namespace App\Tests\Controller;
 
 use App\Controller\BuildController;
-use App\Messaging\BuildQueue;
-use PhpAmqpLib\Exception\AMQPIOException;
+use App\Message\BuildJob;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Exception\TransportException;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
- * Unit tests for the enqueue path of BuildController.
+ * Unit tests for the dispatch path of BuildController.
  *
  * The controller is a plain invokable class (it does not extend
- * AbstractController), so it can be constructed directly with a mocked
- * BuildQueue -- no kernel, no container, no broker.
+ * AbstractController), so it can be constructed directly with a mocked message
+ * bus -- no kernel, no container, no broker. The same path through the kernel,
+ * with a real bus and an in-memory transport, is covered by BuildControllerTest.
  */
 final class BuildEnqueueTest extends TestCase
 {
@@ -38,30 +41,33 @@ final class BuildEnqueueTest extends TestCase
         );
     }
 
-    public function testEnqueuesBuildAndReturns202(): void
+    public function testDispatchesBuildJobAndReturns202(): void
     {
-        $queue = $this->createMock(BuildQueue::class);
-        $queue->expects($this->once())
-            ->method('enqueue')
-            ->with($this->callback(function (array $build): bool {
-                // Only allow-listed keys, plus the generated build_id/created_at.
-                self::assertSame(self::PAYLOAD['static_site_id'], $build['static_site_id']);
-                self::assertSame(self::PAYLOAD['slug'], $build['slug']);
-                self::assertSame(self::PAYLOAD['content_download_url'], $build['content_download_url']);
-                self::assertSame(self::PAYLOAD['callback_status_url'], $build['callback_status_url']);
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(function (BuildJob $build): bool {
+                // Only allow-listed fields, plus the generated build_id/created_at.
+                self::assertSame(self::PAYLOAD['static_site_id'], $build->static_site_id);
+                self::assertSame(self::PAYLOAD['slug'], $build->slug);
+                self::assertSame(self::PAYLOAD['content_download_url'], $build->content_download_url);
+                self::assertSame(self::PAYLOAD['callback_status_url'], $build->callback_status_url);
 
                 // build_id is a random 8-byte value, hex-encoded to 16 chars.
-                self::assertMatchesRegularExpression('/^[0-9a-f]{16}$/', $build['build_id']);
+                self::assertMatchesRegularExpression('/^[0-9a-f]{16}$/', $build->build_id);
                 // created_at is a parseable ATOM timestamp.
                 self::assertInstanceOf(
                     \DateTimeImmutable::class,
-                    \DateTimeImmutable::createFromFormat(\DateTimeInterface::ATOM, $build['created_at']),
+                    \DateTimeImmutable::createFromFormat(\DateTimeInterface::ATOM, $build->created_at),
                 );
 
                 return true;
-            }));
+            }))
+            // The real bus returns the Envelope it dispatched, so the double has
+            // to as well -- returning null would not exercise the same contract.
+            ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
 
-        $controller = new BuildController($queue);
+        $controller = new BuildController($bus);
         $response = $controller(self::request(self::PAYLOAD));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
@@ -71,16 +77,17 @@ final class BuildEnqueueTest extends TestCase
         );
     }
 
-    public function testReturns503WhenEnqueueFails(): void
+    public function testReturns503WhenDispatchFails(): void
     {
-        // A queue that throws stands in for any failure reaching the broker
-        // (connection refused, unset AMQP_DSN, ...). The caller must not get a 202.
+        // A bus that throws stands in for any failure reaching the broker
+        // (connection refused, unset AMQP_DSN, ...). Messenger wraps those in
+        // TransportException. The caller must not get a 202.
         // A stub, not a mock: we force behaviour, we do not verify interaction.
-        $queue = $this->createStub(BuildQueue::class);
-        $queue->method('enqueue')
-            ->willThrowException(new AMQPIOException('connection refused'));
+        $bus = $this->createStub(MessageBusInterface::class);
+        $bus->method('dispatch')
+            ->willThrowException(new TransportException('connection refused'));
 
-        $controller = new BuildController($queue);
+        $controller = new BuildController($bus);
         $response = $controller(self::request(self::PAYLOAD));
 
         self::assertSame(Response::HTTP_SERVICE_UNAVAILABLE, $response->getStatusCode());
@@ -90,17 +97,17 @@ final class BuildEnqueueTest extends TestCase
         );
     }
 
-    public function testRejectsIncompletePayloadWithoutEnqueuing(): void
+    public function testRejectsIncompletePayloadWithoutDispatching(): void
     {
-        // Validation short-circuits before any enqueue, so the queue must never
+        // Validation short-circuits before any dispatch, so the bus must never
         // be called for an incomplete payload.
-        $queue = $this->createMock(BuildQueue::class);
-        $queue->expects($this->never())->method('enqueue');
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->never())->method('dispatch');
 
         $payload = self::PAYLOAD;
         unset($payload['slug']);
 
-        $controller = new BuildController($queue);
+        $controller = new BuildController($bus);
         $response = $controller(self::request($payload));
 
         self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
