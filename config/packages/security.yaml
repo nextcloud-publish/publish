@@ -1,0 +1,61 @@
+# see https://symfony.com/doc/current/security.html#access-token
+
+# Bearer-token authentication for the whole API. The Flex recipe's starter
+# config was replaced wholesale: it assumes a session-based HTML login form,
+# which is the opposite of what a stateless JSON API wants. Its `dev` firewall
+# in particular matched `^/(_profiler|_wdt|assets|build)/` -- there is no
+# profiler, WDT or asset bundle here, and that pattern would have made a future
+# `/build/status` silently unauthenticated.
+security:
+    # One caller, one role. There is no database and no user store: this
+    # provider exists only so the firewall has something to turn the shared
+    # secret into. The identifier is what ApiTokenHandler returns, the role is
+    # what access_control below demands. No password -- nothing ever hashes or
+    # verifies one, which is also why there is no password_hashers section.
+    providers:
+        api_clients:
+            memory:
+                users:
+                    publish-api: { roles: ['ROLE_API'] }
+
+    firewalls:
+        # First match wins, so this has to stay above `main`. `security: false`
+        # installs no listeners at all for /health -- not even the
+        # authenticator -- so a monitoring probe that sends a stale or
+        # malformed Authorization header cannot be answered with a 401. A
+        # health check that can fail authentication is useless to a load
+        # balancer. Anchored with $ so nothing under /health/ slips in here.
+        health:
+            pattern: ^/health$
+            security: false
+
+        main:
+            pattern: ^/
+            # No session, no cookie: the token is re-checked on every request,
+            # which is what a token API wants and what makes CSRF protection
+            # unnecessary.
+            stateless: true
+            provider: api_clients
+            access_token:
+                token_handler: App\Security\ApiTokenHandler
+                # Already the default. Naming it keeps the secret out of query
+                # strings and request bodies -- where it would end up in access
+                # logs -- even if that default ever changes.
+                token_extractors: ['header']
+            # AccessTokenAuthenticator implements AuthenticatorInterface only,
+            # so it is not an entry point and none is auto-registered. Without
+            # this, a request carrying no credentials at all falls through to
+            # ExceptionListener::throwUnauthorizedException() and gets an HTML
+            # error page instead of a 401 challenge.
+            entry_point: App\Security\BearerEntryPoint
+
+    # Note: only the *first* matching rule is applied. This single rule is the
+    # whole policy, and it is the point of the migration: deny by default. A
+    # controller that forgets to opt in is still protected -- opting *out* now
+    # means editing this file, which is reviewable.
+    #
+    # /health is not listed because its firewall is `security: false`, which
+    # skips access_control entirely. A PUBLIC_ACCESS rule for it here would
+    # look live and never be evaluated.
+    access_control:
+        - { path: ^/, roles: ROLE_API }

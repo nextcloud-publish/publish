@@ -22,7 +22,7 @@ services:
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
-    App\Controller\ApiTokenCheck:
+    App\Security\ApiTokenHandler:
         arguments:
             # Shared secret every protected endpoint checks. No default here or
             # in .env on purpose: an unset token is a broken deployment, and

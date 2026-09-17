@@ -2,8 +2,14 @@
 framework:
     secret: '%env(APP_SECRET)%'
 
-    # Note that the session will be started ONLY if you read or write from it.
-    session: true
+    # No sessions. Nothing in this app reads or writes one and the firewall in
+    # config/packages/security.yaml is stateless, so no cookie is ever issued.
+    # Leaving sessions enabled would also silently auto-enable
+    # framework.csrf_protection, because SecurityBundle brings
+    # symfony/security-csrf into vendor/ -- a CSRF token manager in a JSON API
+    # with no forms, and another consumer of APP_SECRET. Re-check this if a
+    # stateful firewall is ever added: those need session.factory to exist.
+    # session: true
 
     #esi: true
     #fragments: true
@@ -11,5 +17,3 @@ framework:
 when@test:
     framework:
         test: true
-        session:
-            storage_factory_id: session.storage.factory.mock_file
