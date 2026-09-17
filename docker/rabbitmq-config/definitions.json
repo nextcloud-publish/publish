@@ -1,6 +1,6 @@
 {
   "rabbit_version": "4.0.0",
-  "comment": "Minimum working topology for the publish service: ONE pending-builds queue and nothing else. This file is the SINGLE SOURCE OF TRUTH -- RabbitMQ imports it at boot (load_definitions in rabbitmq.conf), so the application must never declare topology itself. There are deliberately no exchanges: publishers use the default exchange with the routing key set to the queue name (basic_publish($msg, '', 'q.builds')). This is a starting point, not the final topology -- results, dead-lettering and unrouted-message handling are expected to arrive later. Queue and exchange arguments are IMMUTABLE once created: a re-import silently keeps the existing definition, so any change here needs the broker recreated with the rabbitmq-data volume removed (docker compose down -v).",
+  "comment": "Topology for the publish service. This file is the SINGLE SOURCE OF TRUTH -- RabbitMQ imports it at boot (load_definitions in rabbitmq.conf), so the application must never declare topology itself. Most traffic uses the default exchange with the routing key set to the queue name, which is why q.builds, q.build-results and q.build-failures have no exchange or binding of their own. Queue and exchange arguments are IMMUTABLE once created: a re-import silently keeps the existing definition, so CHANGING one of these needs the broker recreated with the rabbitmq-data volume removed (docker compose down -v). ADDING a new object does not -- a re-import leaves existing objects alone, so `docker compose restart rabbitmq` is enough. Note the import is all-or-nothing per boot: one typo here and the node starts with NO topology at all, so verify in the management UI rather than trusting `compose ps`. TWO DELIBERATE EXCEPTIONS to 'the application never declares topology' live in the exchanges list. (1) 'delays' is required by Symfony Messenger the moment any transport sets retry_strategy.delay > 0: with auto_setup:false, Connection::setupDelay() skips declaring the exchange but STILL runs declareQueue() and bind() on it, so a missing 'delays' is a 404 raised inside Worker::ack(), uncaught, killing the consumer. Its type and flags must match what getDelayExchange() would have declared: direct + durable. Messenger also declares its own delay queues at runtime -- delay_<exchange>_<routing_key>_<ms>_retry, classic, with x-message-ttl and x-expires so they clean themselves up, dead-lettering back to '' with the source queue as the routing key. That runtime declaration is unavoidable and is the one place the app owns topology. Do NOT set default_queue_type=quorum on the vhost to avoid listing arguments below: those runtime delay queues would become quorum, and quorum queues cannot be redeclared to renew an x-expires lease. (2) 'x.build-dead' is a FANOUT on purpose. When Messenger sends to a failure transport, AmqpSender rebuilds an AmqpStamp from the received AMQP envelope and -- because SentToFailureTransportStamp is set -- inherits the ORIGINAL routing key rather than the queue name. Published to the default exchange that would route the message straight back onto the queue it just failed out of, forever. A fanout ignores the routing key, which breaks the loop.",
 
   "users": [
     {
@@ -30,7 +30,26 @@
   "global_parameters": [],
   "topic_permissions": [],
 
-  "exchanges": [],
+  "exchanges": [
+    {
+      "name": "delays",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "x.build-dead",
+      "vhost": "/",
+      "type": "fanout",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
 
   "queues": [
     {
@@ -39,8 +58,38 @@
       "durable": true,
       "auto_delete": false,
       "arguments": { "x-queue-type": "quorum" }
+    },
+    {
+      "name": "q.build-results",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum" }
+    },
+    {
+      "name": "q.build-failures",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum" }
+    },
+    {
+      "name": "q.build-dead",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum" }
     }
   ],
 
-  "bindings": []
+  "bindings": [
+    {
+      "source": "x.build-dead",
+      "vhost": "/",
+      "destination": "q.build-dead",
+      "destination_type": "queue",
+      "routing_key": "",
+      "arguments": {}
+    }
+  ]
 }

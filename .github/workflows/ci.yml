@@ -24,6 +24,12 @@ env:
   # -- that last one is a hard platform requirement, so composer install
   # itself fails without it. mbstring backs the serializer's string handling.
   PHP_EXTENSIONS: ctype, iconv, amqp, mbstring
+  # The result worker's three roots have no fallback (see config/services.yaml),
+  # so anything that compiles the container needs them resolvable. The values
+  # are irrelevant here: no test writes to them, each builds its own temp tree.
+  JOB_STORAGE_DIR: /tmp/ssg-ci/build_temp
+  PUBLISHED_DIR: /tmp/ssg-ci/published
+  FAILED_DIR: /tmp/ssg-ci/build_failed
 
 jobs:
   lint:
