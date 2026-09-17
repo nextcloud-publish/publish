@@ -15,15 +15,13 @@ env:
   # The one supported PHP: what composer.json requires and what
   # docker/Dockerfile ships. Keep those three in step.
   PHP_VERSION: '8.5'
-  # No AMQP_DSN here, unlike ssg-worker's MAX_DOWNLOAD_MB: it is the only
-  # no-fallback variable this app has, and Messenger resolves a transport DSN
-  # when it connects rather than when the container compiles. Tests never
-  # reach it either -- when@test swaps the transport for in-memory://.
+  # AMQP_DSN and PUBLISH_API_TOKEN have no default and are not set here, and no job needs them.
+  # lint:container leaves %env(...)% unresolved, and Messenger reads the DSN only when it connects.
+  # The tests use the in-memory:// transport from when@test and the token from .env.test.
   #
-  # ctype/iconv are required by composer.json, amqp by symfony/amqp-messenger
-  # -- that last one is a hard platform requirement, so composer install
-  # itself fails without it. mbstring backs the serializer's string handling.
-  PHP_EXTENSIONS: ctype, iconv, amqp, mbstring
+  # composer install fails without ctype, iconv and xml (composer.json) and amqp (symfony/amqp-messenger).
+  # mbstring is optional: symfony/polyfill-mbstring is used when it is missing.
+  PHP_EXTENSIONS: ctype, iconv, amqp, xml, mbstring
 
 jobs:
   lint:

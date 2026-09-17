@@ -1,0 +1,36 @@
+# Bearer-token authentication for the whole API.
+# See https://symfony.com/doc/current/security.html#access-token
+# The Flex recipe's session and login-form config does not apply to a stateless JSON API and is not used.
+security:
+    # The API's single user, which ApiTokenHandler returns on a token match.
+    # There is no user store and no password, so there is no password_hashers section.
+    providers:
+        api_clients:
+            memory:
+                users:
+                    publish-api: { roles: ['ROLE_API'] }
+
+    firewalls:
+        # Must stay above `main`: the first matching firewall is used.
+        # `security: false` registers no listeners, so an Authorization header on /health is never read and cannot cause a 401.
+        # Anchored with $, so paths under /health/ fall through to `main`.
+        health:
+            pattern: ^/health$
+            security: false
+
+        main:
+            pattern: ^/
+            # No session and no cookie; the token is checked on every request, so CSRF protection is not needed.
+            stateless: true
+            provider: api_clients
+            access_token:
+                token_handler: App\Security\ApiTokenHandler
+                # The default, set explicitly: the token is read from the Authorization header only, never from a query string, which access logs record.
+                token_extractors: ['header']
+            # No entry_point: a request without a token gets Symfony's default 401 from
+            # ExceptionListener::throwUnauthorizedException(), without a WWW-Authenticate header.
+
+    # Denies every path to a caller without ROLE_API, so a new endpoint is protected without extra config.
+    # /health is not listed: its `security: false` firewall skips access_control, so a rule for it would never be evaluated.
+    access_control:
+        - { path: ^/, roles: ROLE_API }
