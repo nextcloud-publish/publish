@@ -5,17 +5,53 @@ build requests and puts them on RabbitMQ for `ssg-worker` to pick up.
 
 ## Endpoints
 
-| Method | Path      | Response                                                       |
-| ------ | --------- | -------------------------------------------------------------- |
-| GET    | `/health` | `{"status":"ok"}`                                              |
-| POST   | `/build`  | `202` `{"status":"enqueued"}`                                  |
-|        |           | `400` `{"status":"invalid",...}` — a required field is missing |
-|        |           | `503` `{"status":"error",...}` — the broker was unreachable    |
+| Method | Path      | Response                                                            |
+| ------ | --------- | ------------------------------------------------------------------- |
+| GET    | `/health` | `{"status":"ok"}` — public, no token                                |
+| POST   | `/build`  | `202` `{"status":"enqueued"}`                                       |
+|        |           | `400` `{"status":"invalid",...}` — a required field is missing      |
+|        |           | `401` `{"status":"unauthorized",...}` — missing or invalid token    |
+|        |           | `503` `{"status":"error",...}` — the broker was unreachable         |
 
 `POST /build` requires `static_site_id`, `slug`, `content_download_url` and
 `callback_status_url`. Anything else in the body is ignored. The `202` is only sent
 after the broker confirms the publish, so it is never returned for a job that was not
 actually queued.
+
+## Authentication
+
+`POST /build` requires a shared secret, sent as a bearer token:
+
+```
+Authorization: Bearer <PUBLISH_API_TOKEN>
+```
+
+| Variable            | Required | Default | Description                              |
+| ------------------- | -------- | ------- | ---------------------------------------- |
+| `PUBLISH_API_TOKEN` | yes      | none    | Shared secret for protected endpoints    |
+
+`PUBLISH_API_TOKEN` has no fallback. Left unset, Symfony cannot resolve the env var and
+the application fails to serve; left blank, every request gets a `401`.
+
+Generate one per deployment:
+
+```bash
+openssl rand -hex 32
+```
+
+A missing token and a wrong one return the same `401` body, so the response cannot be
+used to tell which half of a guess was right. The check runs before the request body is
+parsed, and `401` responses carry `WWW-Authenticate: Bearer`.
+
+`/health` deliberately stays public so container healthchecks and monitoring can reach
+it — `HealthController` simply does not inject `ApiTokenCheck`. There is no firewall
+config and no route allow-list: an endpoint is protected exactly when its controller
+asks for `ApiTokenCheck`, which is also what a new controller has to do to opt in.
+
+> **Deploying behind Apache:** Apache with PHP-FPM strips the `Authorization` header
+> unless `CGIPassAuth On` is set for the vhost (or it is forwarded with a
+> `SetEnvIf Authorization` rewrite). Without that, every request arrives without a token
+> and gets a `401`. nginx passes it through unchanged.
 
 ## Queueing
 
@@ -58,9 +94,16 @@ and its `type` header back into its own `App\Message\BuildJob`.
 
 ```bash
 composer install
-php -S localhost:8080 -t public public/index.php
+PUBLISH_API_TOKEN=$(openssl rand -hex 32) php -S localhost:8080 -t public public/index.php
 curl -s localhost:8080/health
+curl -s -X POST localhost:8080/build \
+  -H "Authorization: Bearer $PUBLISH_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"static_site_id":"1234-5678","slug":"demo","content_download_url":"https://example.org/a.tar.gz","callback_status_url":"https://example.org/status"}'
 ```
+
+`PUBLISH_API_TOKEN` has to be set for the server to start serving — see
+[Authentication](#authentication).
 
 ## Docker (dev stack)
 
@@ -95,10 +138,13 @@ php bin/phpunit
 config/
   packages/messenger.yaml  builds transport + BuildJob routing
 public/index.php           Front controller
+config/services.yaml       binds PUBLISH_API_TOKEN into ApiTokenCheck
 src/
   Controller/              HealthController, BuildController
+                           ApiTokenCheck: shared bearer-token check the controllers inject
   Message/BuildJob.php     the message shape for q.builds
-tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest
+tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest,
+                           ApiTokenCheckTest
 docker/
   Dockerfile               php:8.5-cli-alpine + ext-amqp + built-in server
   compose.dev.yaml         dev stack: api + RabbitMQ

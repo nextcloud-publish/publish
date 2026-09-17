@@ -10,6 +10,10 @@ services:
       APP_DEBUG: "1"
       AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
       AMQP_HEARTBEAT: "10"
+      # Shared secret for POST /build, sent as `Authorization: Bearer <token>`.
+      # Dev value, committed on purpose; generate a real one per deployment with
+      # `openssl rand -hex 32`.
+      PUBLISH_API_TOKEN: "dev-api-token-0123456789"
     ports:
       - "8080:8080"
     volumes:

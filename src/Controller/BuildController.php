@@ -13,8 +13,10 @@ use Symfony\Component\Routing\Attribute\Route;
 
 final class BuildController
 {
-    public function __construct(private readonly MessageBusInterface $bus)
-    {
+    public function __construct(
+        private readonly MessageBusInterface $bus,
+        private readonly ApiTokenCheck $apiTokenCheck,
+    ) {
     }
 
     // Checks the payload for the required fields:
@@ -30,6 +32,19 @@ final class BuildController
     #[Route('/build', name: 'build', methods: ['POST'])]
     public function __invoke(Request $request): JsonResponse
     {
+        // First, before toArray(): that throws JsonException on a malformed
+        // body, so checking the token here keeps an unauthenticated caller from
+        // reaching it. A missing token and a wrong one give the same answer, so
+        // the response cannot be used to tell which half was right.
+        if (!$this->apiTokenCheck->authenticates($request)) {
+            return new JsonResponse(
+                ['status' => 'unauthorized', 'error' => 'missing or invalid api token'],
+                Response::HTTP_UNAUTHORIZED,
+                // RFC 7235 requires the challenge on a 401.
+                ['WWW-Authenticate' => 'Bearer'],
+            );
+        }
+
         $payload = $request->toArray();
 
         if (!$this->incomingPayloadComplete($payload)) {
