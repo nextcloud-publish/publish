@@ -10,7 +10,7 @@ build requests and puts them on RabbitMQ for `ssg-worker` to pick up.
 | GET    | `/health` | `{"status":"ok"}` — public, no token                                |
 | POST   | `/build`  | `202` `{"status":"enqueued"}`                                       |
 |        |           | `400` `{"status":"invalid",...}` — a required field is missing      |
-|        |           | `401` `{"status":"unauthorized",...}` — missing or invalid token    |
+|        |           | `401` empty body — missing or invalid token, see below              |
 |        |           | `503` `{"status":"error",...}` — the broker was unreachable         |
 
 `POST /build` requires `static_site_id`, `slug`, `content_download_url` and
@@ -30,8 +30,9 @@ Authorization: Bearer <PUBLISH_API_TOKEN>
 | ------------------- | -------- | ------- | ---------------------------------------- |
 | `PUBLISH_API_TOKEN` | yes      | none    | Shared secret for protected endpoints    |
 
-`PUBLISH_API_TOKEN` has no fallback. Left unset, Symfony cannot resolve the env var and
-the application fails to serve; left blank, every request gets a `401`.
+`PUBLISH_API_TOKEN` has no fallback. Left blank, every request gets a `401`. Left unset,
+the env var cannot be resolved, so a caller that actually sends a token gets a `500` and
+nothing is ever enqueued. Either way a misconfigured deployment is closed, not open.
 
 Generate one per deployment:
 
@@ -39,14 +40,33 @@ Generate one per deployment:
 openssl rand -hex 32
 ```
 
-A missing token and a wrong one return the same `401` body, so the response cannot be
-used to tell which half of a guess was right. The check runs before the request body is
-parsed, and `401` responses carry `WWW-Authenticate: Bearer`.
+The scheme is matched case-sensitively and the token must consist of
+`A-Z a-z 0-9 - _ + ~ / .` with optional trailing `=` — `openssl rand -hex 32`, base64 and
+base64url all qualify. `bearer <token>` in lower case does not.
+
+`401` responses have an empty body and carry the challenge in the header, per RFC 6750:
+
+| Situation | `WWW-Authenticate` |
+| --- | --- |
+| No token, or one the header parser rejects | `Bearer` |
+| A token that parsed but did not match | `Bearer error="invalid_token",error_description="Invalid credentials."` |
+
+Authentication is a firewall, configured in `config/packages/security.yaml` — not
+something each controller opts into. One `access_control` rule requires `ROLE_API` for
+every path, so **a new endpoint is protected by default** and opting out means editing
+that file. The check runs on `kernel.request`, before the controller is resolved, so a
+request without a valid token never reaches any application code — a malformed JSON body
+without a token is a `401`, not a `500`. Routing runs earlier still, so an unregistered
+path is a `404` rather than a `401`.
 
 `/health` deliberately stays public so container healthchecks and monitoring can reach
-it — `HealthController` simply does not inject `ApiTokenCheck`. There is no firewall
-config and no route allow-list: an endpoint is protected exactly when its controller
-asks for `ApiTokenCheck`, which is also what a new controller has to do to opt in.
+it. It has its own firewall with `security: false`, which means no authenticator ever
+inspects its requests: a probe that sends a stale or malformed `Authorization` header
+still gets a `200`. A health check that can fail authentication is useless to a load
+balancer.
+
+`docs/security-bundle.md` records why this replaced the hand-written check, and what it
+cost.
 
 > **Deploying behind Apache:** Apache with PHP-FPM strips the `Authorization` header
 > unless `CGIPassAuth On` is set for the vhost (or it is forwarded with a
@@ -82,13 +102,17 @@ and its `type` header back into its own `App\Message\BuildJob`.
 
 ## Requirements
 
-- PHP >= 8.4 and [Composer](https://getcomposer.org/) for local runs
+- PHP >= 8.4.1 and [Composer](https://getcomposer.org/) for local runs. `ext-ctype`,
+  `ext-iconv` and `ext-xml` are declared in `composer.json`; the last one comes from
+  `symfony/security-bundle`.
 - [Docker](https://www.docker.com/) with Compose v2 for the containerized dev stack
-- `ext-amqp` to actually publish. It is not declared in `composer.json`, so a host
-  without it can still `composer install` and run the whole test suite (the tests swap
-  in an in-memory transport) — but `POST /build` will answer `503`. The Docker image
-  installs it with [PIE](https://github.com/php/pie); use the dev stack if you need a
-  working `/build` locally.
+- `ext-amqp` to actually publish. `symfony/amqp-messenger` requires it, so `composer
+  install` refuses to run on a host without it; pass
+  `--ignore-platform-req=ext-amqp` to install anyway. Everything then works except
+  publishing — the whole test suite passes (the tests swap in an in-memory transport)
+  but `POST /build` answers `503`. The Docker image installs it with
+  [PIE](https://github.com/php/pie); use the dev stack if you need a working `/build`
+  locally.
 
 ## Local development
 
@@ -102,8 +126,8 @@ curl -s -X POST localhost:8080/build \
   -d '{"static_site_id":"1234-5678","slug":"demo","content_download_url":"https://example.org/a.tar.gz","callback_status_url":"https://example.org/status"}'
 ```
 
-`PUBLISH_API_TOKEN` has to be set for the server to start serving — see
-[Authentication](#authentication).
+`PUBLISH_API_TOKEN` has to be set for `POST /build` to work at all — see
+[Authentication](#authentication). `/health` does not need it.
 
 ## Docker (dev stack)
 
@@ -137,14 +161,17 @@ php bin/phpunit
 ```
 config/
   packages/messenger.yaml  builds transport + BuildJob routing
+  packages/security.yaml   the firewalls, and the one access_control rule
 public/index.php           Front controller
-config/services.yaml       binds PUBLISH_API_TOKEN into ApiTokenCheck
+config/services.yaml       binds PUBLISH_API_TOKEN into ApiTokenHandler
 src/
   Controller/              HealthController, BuildController
-                           ApiTokenCheck: shared bearer-token check the controllers inject
+  Security/                ApiTokenHandler: compares the token, yields the API identity
+                           BearerEntryPoint: the 401 for a request with no credentials
   Message/BuildJob.php     the message shape for q.builds
-tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest,
-                           ApiTokenCheckTest
+tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest
+tests/Security/            ApiTokenHandlerTest
+docs/security-bundle.md    why SecurityBundle replaced the hand-written check
 docker/
   Dockerfile               php:8.5-cli-alpine + ext-amqp + built-in server
   compose.dev.yaml         dev stack: api + RabbitMQ
