@@ -1,0 +1,166 @@
+name: publish-dev
+
+# The whole system: API, broker, build worker, result worker, and a stand-in for
+# the Nextcloud Collectives content API. Replaces the older api-plus-broker
+# compose.dev.yaml, and the integration-test/docker-compose.yml both repos used
+# to reference but which never existed.
+#
+# ssg-worker is built from a SIBLING CHECKOUT (../../../ssg-worker). Clone both
+# repos into the same parent directory or the two worker services will not build.
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: rabbitmq
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ../rabbitmq-config/rabbitmq.conf:/etc/rabbitmq/conf.d/20-custom.conf:ro
+      - ../rabbitmq-config/definitions.json:/etc/rabbitmq/definitions.json:ro
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP
+      - "127.0.0.1:15672:15672"   # management UI
+    # Two consumers now race the definitions import at boot. Without this they
+    # can connect before q.build-results exists and die on a 404, which looks
+    # like a config bug rather than a startup ordering one.
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # The REST API. Never consumes result queues -- see docs/build-pipeline.md.
+  app:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    image: publish-dev-app
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      AMQP_HEARTBEAT: "10"
+      # Unused by the HTTP process, but every container built from this image
+      # compiles the same service container, so they must resolve.
+      JOB_STORAGE_DIR: /opt/ssg/build_temp
+      PUBLISHED_DIR: /opt/ssg/published
+      FAILED_DIR: /opt/ssg/build_failed
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../..:/app
+      # Anonymous volume: the image installs vendor/ at build time and the bind
+      # mount above would otherwise shadow it. Cost: a host-side `composer
+      # require` is invisible until `docker compose build`.
+      - /app/vendor
+      # The API never touches these, but it is built from the same image as the
+      # result worker and compiles the same service container, so keeping the
+      # mounts identical means a shell in here sees what the worker sees.
+      - ssg-build-temp:/opt/ssg/build_temp
+      - ./published:/opt/ssg/published
+      - ./build_failed:/opt/ssg/build_failed
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # Consumes q.builds, renders the site, publishes the outcome.
+  ssg-worker:
+    build:
+      context: ../../../ssg-worker
+      dockerfile: Dockerfile
+    image: ssg-worker-dev
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      AMQP_HEARTBEAT: "10"
+      JOB_STORAGE_DIR: /opt/ssg/build_temp
+      MAX_DOWNLOAD_MB: "256"
+    volumes:
+      - ../../../ssg-worker:/app
+      - /app/vendor
+      # Build temp only: this service renders into it and never reads the
+      # published or quarantine trees.
+      - ssg-build-temp:/opt/ssg/build_temp
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Consumes the result queues: promotes or quarantines the build, then calls back.
+  #
+  # Same image as `app`, different command -- that is the whole of option A.
+  result-worker:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    image: publish-dev-app
+    # FAILURES FIRST. messenger:consume is strict priority, not round-robin:
+    # Worker::run() breaks out of the receiver loop as soon as one yields and
+    # restarts from the first, so a busy q.build-results would starve
+    # q.build-failures indefinitely.
+    #
+    # No --keepalive: it is opt-in and Worker::keepalive() throws for every
+    # transport that ships today, AmqpReceiver included.
+    command:
+      - php
+      - bin/console
+      - messenger:consume
+      - build_failures
+      - build_results
+      - --time-limit=3600
+      - --memory-limit=128M
+      - -vv
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      AMQP_HEARTBEAT: "10"
+      JOB_STORAGE_DIR: /opt/ssg/build_temp
+      PUBLISHED_DIR: /opt/ssg/published
+      FAILED_DIR: /opt/ssg/build_failed
+    volumes:
+      - ../..:/app
+      - /app/vendor
+      # THREE SEPARATE MOUNTS, on purpose: the build temp tree is a named
+      # volume (churn, never inspected by hand) while the published and
+      # quarantine trees are bind mounts so they can be read straight off the
+      # host. The consequence is that no move between them can be a rename() --
+      # see Filesystem::moveDir(), which copies across the boundary.
+      - ssg-build-temp:/opt/ssg/build_temp
+      - ./published:/opt/ssg/published
+      - ./build_failed:/opt/ssg/build_failed
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Stands in for the Nextcloud Collectives content API, and (on :8081) serves
+  # the published tree so permissions can actually be checked.
+  collectives-mock:
+    build:
+      context: ./collectives-mock
+    image: collectives-mock-dev
+    ports:
+      - "127.0.0.1:8081:8081"     # published sites, read-only
+      - "127.0.0.1:8082:80"       # the content archives
+    volumes:
+      # Only the published tree, and read-only: this serves sites, it does not
+      # need the build temp or the quarantined failures.
+      - ./published:/opt/ssg/published:ro
+
+volumes:
+  # Build scratch only -- downloaded archives, extracted content, rendered
+  # output. High churn, nothing anyone reads by hand, so a named volume rather
+  # than a bind mount keeps it out of the working tree.
+  #
+  # published/ and build_failed/ are deliberately NOT here: they are bind mounts
+  # next to this file so a finished site or a failed build can be inspected
+  # directly. That makes them separate mount points from this volume, which is
+  # why moves between them copy rather than rename -- rename(2) rejects
+  # `old_path.mnt != new_path.mnt` with EXDEV, and PHP has no directory
+  # fallback. Filesystem::moveDir() handles it; BuildPromoter keeps the visible
+  # swap atomic by staging inside the published tree.
+  ssg-build-temp:
+  rabbitmq-data:

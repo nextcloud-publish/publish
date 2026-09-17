@@ -1,6 +1,16 @@
 # see https://symfony.com/doc/current/messenger.html
 framework:
     messenger:
+        # Default for messenger:failed:show / :retry / :remove when no
+        # --transport is given, and the fallback failure transport for every
+        # transport that does not name one itself (including the send-only
+        # `builds`, where it is inert because nothing consumes it here).
+        #
+        # It must name a transport that exists in EVERY environment: an unknown
+        # name is a compile-time LogicException, so `when@test` below declares
+        # build_dead too.
+        failure_transport: build_dead
+
         transports:
             builds:
                 # Same variable the whole stack already uses, and the same one
@@ -41,18 +51,139 @@ framework:
                     # rabbitmq-config/rabbitmq.conf, or a quiet socket looks dead.
                     heartbeat: '%env(int:AMQP_HEARTBEAT)%'
 
+                    # Send-only here; ssg-worker is what consumes q.builds.
+                    # Without the key, fromDsn() would default the queue map to
+                    # ['messages' => []] and `messenger:stats` would then
+                    # declare a "messages" queue on the broker -- the one thing
+                    # this stack forbids the application from doing.
+                    queues: false
+
                     exchange:
-                        # definitions.json defines no exchanges. The empty name
-                        # is the default exchange, where the routing key is
-                        # taken as a queue name and the message is delivered
-                        # straight to it -- the same thing
+                        # definitions.json defines no exchange for this queue.
+                        # The empty name is the default exchange, where the
+                        # routing key is taken as a queue name and the message
+                        # is delivered straight to it -- the same thing
                         # basic_publish($msg, '', 'q.builds') did before.
                         name: ''
                         default_publish_routing_key: q.builds
 
+            # --- result worker: consumed by `messenger:consume` ---------------
+            build_results:
+                dsn: '%env(AMQP_DSN)%'
+                serializer: messenger.transport.symfony_serializer
+                options:
+                    auto_setup: false
+                    heartbeat: '%env(int:AMQP_HEARTBEAT)%'
+                    # Applies to the retry republish this transport makes for
+                    # itself. Harmless on a consuming channel: publisher
+                    # confirms and consumer acks are independent.
+                    confirm_timeout: 5
+                    queues:
+                        q.build-results:
+                            # NOT a declaration -- auto_setup is off. But
+                            # countMessagesInQueues() DOES call declareQueue(),
+                            # so without the arguments `messenger:stats` and
+                            # `messenger:failed:*` redeclare this as a classic
+                            # queue and get PRECONDITION_FAILED (406).
+                            arguments:
+                                x-queue-type: quorum
+                    exchange:
+                        # REQUIRED, not decoration: retries are republished
+                        # through this transport's own sender. With no exchange
+                        # block the name is derived from the DSN path and falls
+                        # back to a literal "messages" exchange that does not
+                        # exist -- a 404 raised inside Worker::ack() where
+                        # nothing catches it, killing the worker. A retry's
+                        # AmqpStamp carries the source QUEUE name as its routing
+                        # key, so the default exchange returns it correctly.
+                        name: ''
+                        default_publish_routing_key: q.build-results
+                retry_strategy:
+                    # ~2 minutes across 5 POST attempts: 8s, 16s, 32s, 64s.
+                    # delay * multiplier ** retries.
+                    #
+                    # These delays are broker-side (the message leaves the queue
+                    # and dead-letters back), so they do NOT consume
+                    # consumer_timeout -- only the handler's own wall time does.
+                    max_retries: 4
+                    delay: 8000
+                    multiplier: 2
+                    max_delay: 64000
+                    # 0, not the framework default of 0.1: the jittered value is
+                    # embedded in the delay QUEUE NAME, so any jitter creates a
+                    # fresh classic queue per message per attempt. They expire
+                    # on their own, so it is churn rather than a leak, but it
+                    # makes the broker unreadable. At 0 there are exactly four.
+                    jitter: 0
+
+            build_failures:
+                dsn: '%env(AMQP_DSN)%'
+                serializer: messenger.transport.symfony_serializer
+                options:
+                    auto_setup: false
+                    heartbeat: '%env(int:AMQP_HEARTBEAT)%'
+                    confirm_timeout: 5
+                    queues:
+                        q.build-failures:
+                            arguments:
+                                x-queue-type: quorum
+                    exchange:
+                        name: ''
+                        default_publish_routing_key: q.build-failures
+                retry_strategy:
+                    max_retries: 4
+                    delay: 8000
+                    multiplier: 2
+                    max_delay: 64000
+                    jitter: 0
+
+            # --- the parking queue -------------------------------------------
+            # Where a result goes once its retries are spent. NOTHING CONSUMES
+            # THIS in normal operation -- it is a parking lot, and a consumer
+            # would just re-run the handler that already failed five times.
+            #
+            # Note `messenger:failed:show` does NOT work against it: AmqpReceiver
+            # is not a ListableReceiverInterface, so that command throws.
+            # Inspect in the management UI; replay with an interactive
+            # `messenger:failed:retry` or a deliberate
+            # `messenger:consume build_dead`.
+            build_dead:
+                dsn: '%env(AMQP_DSN)%'
+                serializer: messenger.transport.symfony_serializer
+                options:
+                    auto_setup: false
+                    heartbeat: '%env(int:AMQP_HEARTBEAT)%'
+                    confirm_timeout: 5
+                    # Both a sender (as the failure transport) and a receiver
+                    # (for a manual replay), so it needs the queue map too.
+                    queues:
+                        q.build-dead:
+                            arguments:
+                                x-queue-type: quorum
+                    exchange:
+                        # A NAMED FANOUT, and this is load-bearing. When
+                        # Messenger sends to a failure transport, AmqpSender
+                        # rebuilds an AmqpStamp from the received AMQP envelope;
+                        # because SentToFailureTransportStamp is set it passes a
+                        # null retry routing key, and
+                        # AmqpStamp::createFromAmqpEnvelope() then falls back to
+                        # the ORIGINAL routing key -- q.build-results. Published
+                        # to the default exchange that would put the message
+                        # straight back on the queue it just failed out of, in a
+                        # loop that never terminates. A fanout ignores the
+                        # routing key. Bound to q.build-dead in definitions.json.
+                        name: x.build-dead
+                retry_strategy:
+                    # Terminal: a replay that fails again goes back to the queue
+                    # through the normal reject path, never fans out further.
+                    max_retries: 0
+
         routing:
-            # No handler exists here; routing the message to a transport is what
-            # makes dispatch() send it to the broker instead of handling it.
+            # No handler exists here for BuildJob; routing the message to a
+            # transport is what makes dispatch() send it to the broker instead
+            # of handling it. BuildSucceeded/BuildFailed are the other
+            # direction: dispatched by ssg-worker, handled here, so they need no
+            # routing entry at all.
             App\Message\BuildJob: builds
 
 when@test:
@@ -60,7 +191,16 @@ when@test:
         messenger:
             transports:
                 # No broker in tests, and AMQP_DSN is never resolved. Tests
-                # assert on what landed in this transport instead of mocking the
-                # bus, which is what lets the 202 path be covered through the
-                # kernel at all.
+                # assert on what landed in these transports instead of mocking
+                # the bus, which is what lets the 202 path be covered through
+                # the kernel at all.
+                #
+                # A scalar override still merges over the base node, so the
+                # options survive and AMQP_HEARTBEAT must still resolve (.env
+                # has the default). InMemoryTransportFactory discards options
+                # entirely, so none of the AMQP keys mean anything here -- which
+                # is also why no test can catch a mistake in them.
                 builds: 'in-memory://'
+                build_results: 'in-memory://'
+                build_failures: 'in-memory://'
+                build_dead: 'in-memory://'

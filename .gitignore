@@ -13,3 +13,15 @@
 /phpunit.xml
 /.phpunit.cache/
 ###< phpunit/phpunit ###
+
+###> result worker dev stack ###
+# Bind mounts for docker/dev/compose.yaml. The published and quarantine trees
+# live here rather than in a named volume so a finished site or a failed build
+# can be read straight off the host -- which also makes them separate mount
+# points from the build temp volume, hence the copy in Filesystem::moveDir().
+# Their contents are build artefacts; only the .gitkeep files are tracked.
+/docker/dev/published/*
+!/docker/dev/published/.gitkeep
+/docker/dev/build_failed/*
+!/docker/dev/build_failed/.gitkeep
+###< result worker dev stack ###
