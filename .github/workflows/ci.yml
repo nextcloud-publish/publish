@@ -60,6 +60,24 @@ jobs:
       - name: Lint service container
         run: php bin/console lint:container
 
+      # definitions.json is imported ALL-OR-NOTHING: one syntax error and the
+      # broker boots with no topology at all, which presents as both services
+      # dying on 404s rather than as a bad JSON file.
+      #
+      # The `delays` exchange is load-bearing in particular. ssg-worker's builds
+      # transport sets retry_strategy.delay > 0, and Messenger binds its runtime
+      # delay queues to that exchange even with auto_setup:false -- a bind to a
+      # missing exchange is a 404 raised inside Worker::ack() where nothing
+      # catches it, so the consumer dies on its first retry. Nothing in either
+      # test suite can catch that; this can.
+      - name: Broker definitions are valid and complete
+        run: |
+          jq -e . docker/rabbitmq-config/definitions.json > /dev/null
+          jq -e '.exchanges[] | select(.name=="delays" and .type=="direct" and .durable==true)' \
+            docker/rabbitmq-config/definitions.json > /dev/null
+          jq -e '.queues[] | select(.name=="q.builds" and .arguments["x-queue-type"]=="quorum")' \
+            docker/rabbitmq-config/definitions.json > /dev/null
+
   test:
     name: Tests
     runs-on: ubuntu-latest
