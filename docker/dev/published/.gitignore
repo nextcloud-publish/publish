@@ -1,0 +1,10 @@
+# The bind mount ssg-worker promotes into, and the external nginx serves.
+#
+# Ignored rather than kept with a .gitkeep: the worker runs as root, so every
+# local build drops root-owned directories in here and they would otherwise
+# show up in `git status` (and need sudo to clear). Clean them from inside the
+# container instead:
+#
+#   docker compose -f docker/dev/compose.yaml exec ssg-worker sh -c 'rm -rf /opt/ssg/published/*'
+*
+!.gitignore

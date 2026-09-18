@@ -1,0 +1,136 @@
+name: publish-dev
+
+# The whole system: API, broker, build worker, and a stand-in for the Nextcloud
+# Collectives content API that doubles as a callback sink and serves the
+# published tree read-only.
+#
+# Replaces the older api-plus-broker docker/compose.dev.yaml, and the
+# integration-test/docker-compose.yml both repos used to reference but which
+# never existed in either history.
+#
+# ssg-worker is built from a SIBLING CHECKOUT (../../../ssg-worker). Clone both
+# repos into the same parent directory or that service will not build.
+#
+#   docker compose -f docker/dev/compose.yaml up --build
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: rabbitmq
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ../rabbitmq-config/rabbitmq.conf:/etc/rabbitmq/conf.d/20-custom.conf:ro
+      - ../rabbitmq-config/definitions.json:/etc/rabbitmq/definitions.json:ro
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP
+      - "127.0.0.1:15672:15672"   # management UI
+    # check_running alone only says the node booted, not that the definitions
+    # import succeeded -- and that import is ALL-OR-NOTHING, so one typo in
+    # definitions.json leaves a healthy node with no topology at all. The
+    # worker then dies on a 404 that looks like a bug on its side.
+    #
+    # Grepping for the delays exchange proves the import actually ran, and
+    # `delays` in particular is what ssg-worker's retries bind to: without it
+    # the consumer dies inside Worker::ack() on the first retry.
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmqctl list_exchanges --quiet --no-table-headers name | grep -qx delays"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  # The REST API. Enqueues builds and nothing else -- it never consumes, never
+  # promotes, and deliberately gets none of the storage roots: in this
+  # single-service design only ssg-worker touches the filesystem.
+  app:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    image: publish-dev-app
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      AMQP_HEARTBEAT: "10"
+      # Shared secret for POST /build, sent as `Authorization: Bearer <token>`.
+      # Dev value, committed on purpose; generate a real one per deployment
+      # with `openssl rand -hex 32`.
+      PUBLISH_API_TOKEN: "dev-api-token-0123456789"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../..:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # Consumes q.builds, renders the site, promotes it, and reports the outcome.
+  ssg-worker:
+    build:
+      context: ../../../ssg-worker
+      dockerfile: Dockerfile
+    image: ssg-worker-dev
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      # Must match `heartbeat` in ../rabbitmq-config/rabbitmq.conf.
+      AMQP_HEARTBEAT: "10"
+      JOB_STORAGE_DIR: /opt/ssg/build_temp
+      PUBLISHED_DIR: /opt/ssg/published
+      MAX_DOWNLOAD_MB: "256"
+    volumes:
+      - ../../../ssg-worker:/app
+      # Anonymous volume: the image installs vendor/ at build time and the bind
+      # mount above would otherwise shadow it. Cost: a host-side
+      # `composer require` is invisible until `docker compose build`.
+      - /app/vendor
+      # TWO SEPARATE MOUNTS, and that is load-bearing.
+      #
+      # build_temp is a named volume: pure scratch, high churn, nobody reads it
+      # by hand. published is a bind mount, because an external nginx serves it
+      # in production and it has to be readable from the host here.
+      #
+      # The consequence is that moving a build from one to the other is a
+      # cross-mount copy: rename(2) rejects `old_path.mnt != new_path.mnt` with
+      # EXDEV before it looks at the superblock, and PHP has no directory
+      # fallback. Filesystem::moveDir() handles it, and this is the only place
+      # that path runs outside a /dev/shm unit test -- so do NOT collapse the
+      # two to make the copies go away. The swap itself stays a rename
+      # regardless, because .staging lives INSIDE the published tree.
+      - ssg-build-temp:/opt/ssg/build_temp
+      - ./published:/opt/ssg/published
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    # REQUIRED, not a nicety: the image's CMD carries --time-limit=3600, so the
+    # worker exits every hour by design and something has to bring it back.
+    restart: unless-stopped
+
+  # Stands in for the Nextcloud Collectives content API (:80), serves the
+  # published tree read-only (:8081), and sinks the status callbacks (:8083).
+  collectives-mock:
+    build:
+      context: ./collectives-mock
+    image: collectives-mock-dev
+    ports:
+      - "127.0.0.1:8081:8081"     # published sites, read-only
+      - "127.0.0.1:8082:80"       # the content archives
+      - "127.0.0.1:8083:8083"     # callback sink -- read it in this service's logs
+    volumes:
+      # Read-only, and that is the point: this serves sites, it must be
+      # structurally incapable of the thing the real nginx also must not do.
+      - ./published:/opt/ssg/published:ro
+
+volumes:
+  # Build scratch: downloaded archives, extracted content, rendered output.
+  # High churn, nothing anyone reads by hand, and deleted whether the build
+  # succeeds or fails -- so a named volume rather than a bind mount keeps it
+  # out of the working tree.
+  #
+  # ./published is deliberately NOT here: it is a bind mount next to this file
+  # so a finished site can be inspected from the host and served by something
+  # outside the stack.
+  ssg-build-temp:
+  rabbitmq-data:

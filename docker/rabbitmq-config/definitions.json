@@ -1,6 +1,6 @@
 {
   "rabbit_version": "4.0.0",
-  "comment": "Minimum working topology for the publish service: ONE pending-builds queue and nothing else. This file is the SINGLE SOURCE OF TRUTH -- RabbitMQ imports it at boot (load_definitions in rabbitmq.conf), so the application must never declare topology itself. There are deliberately no exchanges: publishers use the default exchange with the routing key set to the queue name (basic_publish($msg, '', 'q.builds')). This is a starting point, not the final topology -- results, dead-lettering and unrouted-message handling are expected to arrive later. Queue and exchange arguments are IMMUTABLE once created: a re-import silently keeps the existing definition, so any change here needs the broker recreated with the rabbitmq-data volume removed (docker compose down -v).",
+  "comment": "Topology for the publish service: ONE pending-builds queue, plus the one exchange Symfony Messenger cannot live without. This file is the SINGLE SOURCE OF TRUTH -- RabbitMQ imports it at boot (load_definitions in rabbitmq.conf), so the application must never declare topology itself. q.builds has no exchange or binding of its own: publishers use the default exchange with the routing key set to the queue name. Queue and exchange arguments are IMMUTABLE once created: a re-import silently keeps the existing definition, so CHANGING one needs the broker recreated with the rabbitmq-data volume removed (docker compose down -v). ADDING a new object does NOT -- a re-import leaves existing objects alone, so `docker compose restart rabbitmq` is enough. The import is all-or-nothing per boot: one typo here and the node starts with NO topology at all, so verify in the management UI rather than trusting `compose ps`. ONE DELIBERATE EXCEPTION to 'the application never declares topology' is below. 'delays' is required by Symfony Messenger the moment any transport sets retry_strategy.delay > 0, which ssg-worker's builds transport now does: with auto_setup:false, Connection::setupDelay() skips declaring the exchange but STILL runs declareQueue() and bind() against it, so a missing 'delays' is a 404 raised inside Worker::ack() where nothing catches it -- the consumer dies and the message sits unacked until consumer_timeout. Its type and flags must match what getDelayExchange() would have declared: direct + durable. Messenger also declares its own delay QUEUES at runtime (delay__q.builds_<ms>_retry, classic, with x-message-ttl and x-expires so they clean themselves up, dead-lettering back to the default exchange with q.builds as the routing key). That runtime declaration is unavoidable and is the one place the app owns topology; the app user's configure permission below is what allows it. Do NOT set default_queue_type=quorum on the vhost to avoid listing arguments below: those runtime delay queues would become quorum, and a quorum queue cannot be redeclared to renew an x-expires lease.",
 
   "users": [
     {
@@ -30,7 +30,17 @@
   "global_parameters": [],
   "topic_permissions": [],
 
-  "exchanges": [],
+  "exchanges": [
+    {
+      "name": "delays",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
 
   "queues": [
     {
