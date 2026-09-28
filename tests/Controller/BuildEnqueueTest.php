@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Controller;
 
-use App\Controller\ApiTokenCheck;
 use App\Controller\BuildController;
 use App\Message\BuildJob;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -16,12 +14,9 @@ use Symfony\Component\Messenger\Exception\TransportException;
 use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
- * Unit tests for the dispatch path of BuildController.
- *
- * The controller is a plain invokable class (it does not extend
- * AbstractController), so it can be constructed directly with a mocked message
- * bus -- no kernel, no container, no broker. The same path through the kernel,
- * with a real bus and an in-memory transport, is covered by BuildControllerTest.
+ * Covers the dispatch path of App\Controller\BuildController without a kernel.
+ * The controller does not extend AbstractController, so it is constructed directly with a mocked bus.
+ * A directly constructed controller never passes the security firewall, so the 401 cases are in BuildControllerTest.
  */
 final class BuildEnqueueTest extends TestCase
 {
@@ -33,35 +28,25 @@ final class BuildEnqueueTest extends TestCase
         'slug' => 'some_collective',
     ];
 
-    /** The token BuildController is constructed with throughout this file. */
-    private const TOKEN = 'test-api-token-0123456789';
-
-    /**
-     * A request carrying the valid bearer token unless $authorization says
-     * otherwise; pass null to send no Authorization header at all.
-     */
-    private static function request(array $payload, ?string $authorization = 'Bearer ' . self::TOKEN): Request
+    private static function request(array $payload): Request
     {
-        $server = ['CONTENT_TYPE' => 'application/json'];
-        if ($authorization !== null) {
-            $server['HTTP_AUTHORIZATION'] = $authorization;
-        }
-
         return Request::create(
             '/build',
             'POST',
-            server: $server,
+            server: ['CONTENT_TYPE' => 'application/json'],
             content: (string) json_encode($payload),
         );
     }
 
     /**
-     * A real ApiTokenCheck rather than a double: it has no collaborators, so
-     * stubbing it would only test the stub.
+     * Builds the controller under test.
+     *
+     * @param MessageBusInterface $bus The bus the controller dispatches to.
+     * @return BuildController the controller
      */
     private static function controller(MessageBusInterface $bus): BuildController
     {
-        return new BuildController($bus, new ApiTokenCheck(self::TOKEN));
+        return new BuildController($bus);
     }
 
     public function testDispatchesBuildJobAndReturns202(): void
@@ -138,51 +123,5 @@ final class BuildEnqueueTest extends TestCase
             '{"status":"invalid","error":"missing required fields"}',
             (string) $response->getContent(),
         );
-    }
-
-    public static function unauthenticatedRequests(): iterable
-    {
-        yield 'no Authorization header' => [null];
-        yield 'wrong token' => ['Bearer ' . str_repeat('x', strlen(self::TOKEN))];
-        yield 'non-bearer scheme' => ['Basic ' . self::TOKEN];
-        yield 'bare token without scheme' => [self::TOKEN];
-    }
-
-    #[DataProvider('unauthenticatedRequests')]
-    public function testRejectsUnauthenticatedRequestWithoutDispatching(?string $authorization): void
-    {
-        // The never() is the point: a 401 on its own would not prove the build
-        // was not already enqueued before the check ran.
-        $bus = $this->createMock(MessageBusInterface::class);
-        $bus->expects($this->never())->method('dispatch');
-
-        $controller = self::controller($bus);
-        $response = $controller(self::request(self::PAYLOAD, $authorization));
-
-        self::assertSame(Response::HTTP_UNAUTHORIZED, $response->getStatusCode());
-        self::assertSame('Bearer', $response->headers->get('WWW-Authenticate'));
-        self::assertJsonStringEqualsJsonString(
-            '{"status":"unauthorized","error":"missing or invalid api token"}',
-            (string) $response->getContent(),
-        );
-    }
-
-    public function testRejectsUnauthenticatedRequestBeforeParsingTheBody(): void
-    {
-        // toArray() throws JsonException on a malformed body. Authenticating
-        // first is what keeps that from being reachable without a token.
-        $bus = $this->createMock(MessageBusInterface::class);
-        $bus->expects($this->never())->method('dispatch');
-
-        $request = Request::create(
-            '/build',
-            'POST',
-            server: ['CONTENT_TYPE' => 'application/json'],
-            content: 'not json at all',
-        );
-
-        $response = self::controller($bus)($request);
-
-        self::assertSame(Response::HTTP_UNAUTHORIZED, $response->getStatusCode());
     }
 }

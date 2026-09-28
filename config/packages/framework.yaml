@@ -2,8 +2,10 @@
 framework:
     secret: '%env(APP_SECRET)%'
 
-    # Note that the session will be started ONLY if you read or write from it.
-    session: true
+    # Sessions are disabled: nothing reads or writes one, and the firewall in config/packages/security.yaml is stateless.
+    # With sessions on, framework.csrf_protection is enabled automatically, because SecurityBundle installs symfony/security-csrf.
+    # A stateful firewall requires sessions, so enable them again if one is added.
+    # session: true
 
     #esi: true
     #fragments: true
@@ -11,5 +13,3 @@ framework:
 when@test:
     framework:
         test: true
-        session:
-            storage_factory_id: session.storage.factory.mock_file
