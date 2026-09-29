@@ -1,0 +1,100 @@
+name: publish-dev
+
+# The full dev stack: API, broker, build worker, and collectives-mock,
+# which replaces the Nextcloud Collectives content API, receives the status callbacks and serves the published sites.
+#
+# ssg-worker is built from a sibling checkout at ../../../ssg-worker.
+# Clone both repositories into the same parent directory, or that service will not build.
+#
+#   docker compose -f docker/dev/compose.yaml up --build
+
+services:
+  # publish REST API: receives build requests and enqueues them in rabbitmq.
+  app:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    image: publish-dev-app
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      AMQP_HEARTBEAT: "10"
+      # Shared secret for POST /build, sent as `Authorization: Bearer <token>`.
+      # Dev value, committed on purpose; generate one per deployment with `openssl rand -hex 32`.
+      PUBLISH_API_TOKEN: "dev-api-token-0123456789"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../..:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # RabbitMQ message broker: transport for the build queue, retries and failed builds.
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: rabbitmq
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./rabbitmq-config/rabbitmq.conf:/etc/rabbitmq/conf.d/20-custom.conf:ro
+      - ./rabbitmq-config/definitions.json:/etc/rabbitmq/definitions.json:ro
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP
+      - "127.0.0.1:15672:15672"   # management UI
+    # Checks if the node is running and the delays exchange is declared.
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmqctl list_exchanges --quiet --no-table-headers name | grep -qx delays"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  # Consumes q.builds, renders the site, publishes it, and reports the outcome.
+  # ssg-worker: renders the site and places it in the published directory where it can be served
+  # Success/failure is reported via callback_status_url to the collectives-mock service.
+  ssg-worker:
+    build:
+      context: ../../../ssg-worker
+      dockerfile: docker/Dockerfile
+    image: ssg-worker-dev
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      # Must match `heartbeat` in ./rabbitmq-config/rabbitmq.conf.
+      AMQP_HEARTBEAT: "10"
+      JOB_STORAGE_DIR: /opt/ssg/build_temp
+      PUBLISHED_DIR: /opt/ssg/published
+      # Where collectives-mock serves ./published (:8081); publish_url is built from it.
+      PUBLISH_BASE_URL: "http://127.0.0.1:8081"
+      MAX_DOWNLOAD_MB: "256"
+    volumes:
+      - ../../../ssg-worker:/app
+      # The image installs vendor/ at build time, and the bind mount above would hide it.
+      # A `composer require` on the host has no effect until `docker compose build`.
+      - /app/vendor
+      - ./build_temp:/opt/ssg/build_temp
+      - ./published:/opt/ssg/published
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    # Required: the image's CMD passes --time-limit=3600, so the worker exits every hour.
+    restart: unless-stopped
+
+  # Serves the published sites read-only (:8081) and replaces the Nextcloud Collectives API (:8082):
+  # - content archives under /content/
+  # - status callbacks under /status/ logged to this service's output
+  collectives-mock:
+    build:
+      context: ./collectives-mock
+    image: collectives-mock-dev
+    ports:
+      - "127.0.0.1:8081:8081"     # published sites, read-only
+      - "127.0.0.1:8082:8082"     # content archives and status callbacks
+    volumes:
+      - ./published:/opt/ssg/published:ro
+
+volumes:
+  rabbitmq-data:

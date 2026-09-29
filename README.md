@@ -85,7 +85,7 @@ the broker instead of handling the message locally.
 
 The transport publishes to the default exchange with `q.builds` as the routing key, and
 declares no topology: the broker imports the queue, user and permissions from
-`docker/rabbitmq-config/definitions.json` at boot and owns them, which is why
+`docker/dev/rabbitmq-config/definitions.json` at boot and owns them, which is why
 `auto_setup` is off.
 
 Messages are serialized as JSON by Messenger's built-in `symfony_serializer` (not the
@@ -133,23 +133,44 @@ curl -s -X POST localhost:8080/build \
 
 ## Docker (dev stack)
 
-PHP's built-in web server plus a RabbitMQ node. The compose file lives in `docker/`, so
-its build context is the repository root.
+The whole system: this API, a RabbitMQ node, `ssg-worker`, and a mock that stands in
+for the Nextcloud Collectives content API.
+
+`ssg-worker` is built from a **sibling checkout** at `../ssg-worker`, so clone both
+repos into the same parent directory first.
 
 ```bash
-docker compose -f docker/compose.dev.yaml up --build
+docker compose -f docker/dev/compose.yaml up --build
 curl -s localhost:8080/health
 ```
 
-The management UI is on <http://localhost:15672> (`app` / `secret`) — the place to
-confirm a job actually landed on `q.builds` and to inspect its body and headers. Note
-that this stack only runs the API; to exercise a build end to end with `ssg-worker`
-alongside, use `integration-test/docker-compose.yml` instead of this file (they claim
-the same host ports, so do not run both).
+| Port | What |
+| --- | --- |
+| 8080 | this API |
+| 15672 | RabbitMQ management UI (`app` / `secret`) |
+| 8081 | the published sites, served read-only from `docker/dev/published/` |
+| 8082 | the Nextcloud mock: content archives under `/content/`, status callbacks under `/status/` -- read the callbacks with `docker compose -f docker/dev/compose.yaml logs collectives-mock` |
+
+The management UI is where you confirm a job actually landed on `q.builds` and inspect
+its body and headers. The collectives-mock log is where you see what the worker reported back, which
+is the only place a build's outcome is visible.
+
+A build end to end:
+
+```bash
+curl -sS -X POST localhost:8080/build \
+  -H 'Authorization: Bearer dev-api-token-0123456789' \
+  -H 'Content-Type: application/json' \
+  -d '{"static_site_id":"demo","slug":"demo-site","title":"My Team Handbook",
+       "content_download_url":"http://collectives-mock:8082/content/sample-collective.tar.gz",
+       "callback_status_url":"http://collectives-mock:8082/status/1234"}'
+
+curl -I http://127.0.0.1:8081/demo-site/     # expect 200
+```
 
 The project directory is bind-mounted into the container, so code changes are
 picked up without rebuilding. Install PHP dependencies once on the host (or via
-`docker compose -f docker/compose.dev.yaml exec app composer install`) so
+`docker compose -f docker/dev/compose.yaml exec app composer install`) so
 `vendor/` is populated for the bind mount.
 
 ## Tests
@@ -175,6 +196,9 @@ tests/Security/            ApiTokenHandlerTest
 docs/security-bundle.md    why SecurityBundle replaced the hand-written check
 docker/
   Dockerfile               php:8.5-cli-alpine + ext-amqp + built-in server
-  compose.dev.yaml         dev stack: api + RabbitMQ
-  rabbitmq-config/         definitions.json (topology) + rabbitmq.conf
+  dev/compose.yaml         dev stack: api + RabbitMQ + ssg-worker + mock
+  dev/collectives-mock/    content API stand-in, published-tree server, callback sink
+  dev/published/           bind mount the worker publishes into (gitignored)
+  dev/build_temp/          bind mount for the worker's build scratch (gitignored)
+  dev/rabbitmq-config/     definitions.json (topology) + rabbitmq.conf
 ```
