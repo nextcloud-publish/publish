@@ -1,33 +1,37 @@
 # syntax=docker/dockerfile:1
-FROM php:8.5-cli-alpine
 
-# Symfony Messenger's AMQP transport is built on ext-amqp, which links against
-# rabbitmq-c -- not on php-amqplib, so there is no ext-sockets here any more.
-#
-# PIE, not `pecl install`: PECL is deprecated in favour of PIE (the PHP Installer
-# for Extensions). PIE replaces the download/build/enable orchestration only --
-# the extension still compiles against the rabbitmq-c headers, which is why
-# rabbitmq-c-dev is here. The headers are build-time only; the rabbitmq-c runtime
-# library has to stay.
-#
-# PIE is published as a binary-only image tagged `bin` (latest) or `x.y.z-bin`;
-# there is no `latest` tag to pull.
-COPY --from=ghcr.io/php/pie:bin /pie /usr/bin/pie
+# Stage "base": everything but the source.
+FROM alpine:latest AS base
 
-# unzip is a PIE requirement rather than an amqp one: PIE downloads the extension
-# as a zip, and this base image ships neither unzip nor git to unpack it.
-RUN apk add --no-cache rabbitmq-c \
-    && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS rabbitmq-c-dev unzip \
-    && pie install --no-interaction --no-cache php-amqp/php-amqp \
-    && apk del .build-deps \
+RUN apk add --no-cache \
+        php85 php85-pecl-amqp \
+        php85-ctype php85-iconv php85-xml \
+        php85-dom php85-mbstring php85-tokenizer php85-xmlwriter \
+        php85-curl php85-phar php85-openssl php85-zip \
+        tzdata \
     && php -m | grep -qx amqp
 
-# Composer, handy for running composer commands inside the container
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+# PHP reads TZ when a process starts; the deployment sets it, UTC otherwise.
+ENV TZ=UTC
+RUN echo 'date.timezone = ${TZ}' > /etc/php85/conf.d/99-timezone.ini
 
-WORKDIR /app
+ARG UID=10001
+ARG GID=10001
+RUN addgroup -S -g "$GID" publish && adduser -S -u "$UID" -G publish publish
 
-EXPOSE 8080
+WORKDIR /publish
 
-# PHP's built-in web server, routing every request through the Symfony front controller
-CMD ["php", "-S", "0.0.0.0:8080", "-t", "public", "public/index.php"]
+COPY --from=composer/composer:2-bin /composer /usr/bin/composer
+# --no-scripts: Flex's auto-scripts call bin/console, which is not copied yet.
+COPY composer.json composer.lock* ./
+RUN composer install --no-interaction --no-progress --no-scripts
+
+# var/ holds the Symfony cache, the only directory in the image the app writes.
+RUN mkdir var && chown publish:publish var
+
+USER publish
+
+# Stage "release", the default: base plus the source. It has no CMD, the deployment sets the server.
+FROM base AS release
+
+COPY . .

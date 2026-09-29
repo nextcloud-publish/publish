@@ -85,7 +85,7 @@ the broker instead of handling the message locally.
 
 The transport publishes to the default exchange with `q.builds` as the routing key, and
 declares no topology: the broker imports the queue, user and permissions from
-`docker/rabbitmq-config/definitions.json` at boot and owns them, which is why
+`docker/dev/rabbitmq-config/definitions.json` at boot and owns them, which is why
 `auto_setup` is off.
 
 Messages are serialized as JSON by Messenger's built-in `symfony_serializer` (not the
@@ -108,13 +108,10 @@ and its `type` header back into its own `App\Message\BuildJob`.
   `ext-iconv` and `ext-xml` are declared in `composer.json`; the last one comes from
   `symfony/security-bundle`.
 - [Docker](https://www.docker.com/) with Compose v2 for the containerized dev stack
-- `ext-amqp` to actually publish. `symfony/amqp-messenger` requires it, so `composer
-  install` refuses to run on a host without it; pass
-  `--ignore-platform-req=ext-amqp` to install anyway. Everything then works except
-  publishing — the whole test suite passes (the tests swap in an in-memory transport)
-  but `POST /build` answers `503`. The Docker image installs it with
-  [PIE](https://github.com/php/pie); use the dev stack if you need a working `/build`
-  locally.
+- `ext-amqp` to publish. `symfony/amqp-messenger` requires it, so `composer install`
+  refuses to run without it; `--ignore-platform-req=ext-amqp` installs anyway. The tests
+  then pass, as they use an in-memory transport, but `POST /build` answers `503`. The
+  Docker image has it, so use the dev stack for a working `/build`.
 
 ## Local development
 
@@ -133,24 +130,54 @@ curl -s -X POST localhost:8080/build \
 
 ## Docker (dev stack)
 
-PHP's built-in web server plus a RabbitMQ node. The compose file lives in `docker/`, so
-its build context is the repository root.
+The whole system: this API, a RabbitMQ node, two `ssg-worker` instances, and a mock that
+stands in for the Nextcloud Collectives content API. `ssg-worker` is built from a checkout
+at `../ssg-worker`, so clone both repos into the same parent directory first. All services
+run in the time zone `TZ` of your shell, default `Europe/Berlin`.
 
 ```bash
-docker compose -f docker/compose.dev.yaml up --build
+docker compose -f docker/dev/compose.yaml up --build
 curl -s localhost:8080/health
 ```
 
-The management UI is on <http://localhost:15672> (`app` / `secret`) — the place to
-confirm a job actually landed on `q.builds` and to inspect its body and headers. Note
-that this stack only runs the API; to exercise a build end to end with `ssg-worker`
-alongside, use `integration-test/docker-compose.yml` instead of this file (they claim
-the same host ports, so do not run both).
+| Port | What |
+| --- | --- |
+| 8080 | this API |
+| 5672 | RabbitMQ AMQP, for a worker running on the host |
+| 15672 | RabbitMQ management UI (`app` / `secret`) |
+| 8081 | the published sites, served read-only from `docker/dev/published/` |
+| 8082 | the Nextcloud mock: content archives under `/content/`, status callbacks under `/status/` |
 
-The project directory is bind-mounted into the container, so code changes are
-picked up without rebuilding. Install PHP dependencies once on the host (or via
-`docker compose -f docker/compose.dev.yaml exec app composer install`) so
-`vendor/` is populated for the bind mount.
+All ports are bound to `127.0.0.1`. The management UI shows whether a job landed on
+`q.builds`. The collectives-mock log shows what the worker reported back:
+
+```bash
+docker compose -f docker/dev/compose.yaml logs collectives-mock
+```
+
+A build end to end:
+
+```bash
+curl -sS -X POST localhost:8080/build \
+  -H 'Authorization: Bearer dev-api-token-0123456789' \
+  -H 'Content-Type: application/json' \
+  -d '{"static_site_id":"demo","slug":"demo-site","title":"My Team Handbook",
+       "content_download_url":"http://collectives-mock:8082/content/sample-collective.tar.gz",
+       "callback_status_url":"http://collectives-mock:8082/status/1234"}'
+
+curl -I http://127.0.0.1:8081/demo-site/     # expect 200
+```
+
+The project directory is bind-mounted at `/publish`, so code changes are picked up
+without rebuilding. `vendor/` is installed at image build time and kept behind an
+anonymous volume, so the mount does not shadow it. Rebuild with `--build` after changing
+`composer.json`.
+
+The dev image is stage `base` of `docker/Dockerfile`, Alpine with Alpine's PHP 8.5
+packages. Its user `publish` has uid and gid 10001. Compose runs it with your host ids
+instead (`PUBLISH_UID`/`PUBLISH_GID`, default 1000), so it can write `var/` in the
+checkout. Compose starts PHP's built-in server, which handles one request at a time.
+Stage `release` holds the source and has no `CMD`: a deployment sets the server.
 
 ## Tests
 
@@ -160,12 +187,12 @@ php bin/phpunit
 
 ## Layout
 
-```
+```text
 config/
   packages/messenger.yaml  builds transport + BuildJob routing
   packages/security.yaml   the firewalls, and the one access_control rule
-public/index.php           Front controller
-config/services.yaml       binds PUBLISH_API_TOKEN into ApiTokenHandler
+  services.yaml            binds PUBLISH_API_TOKEN into ApiTokenHandler
+public/index.php           front controller
 src/
   Controller/              HealthController, BuildController
   Security/ApiTokenHandler.php  compares the token, yields the API identity
@@ -174,7 +201,10 @@ tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnque
 tests/Security/            ApiTokenHandlerTest
 docs/security-bundle.md    why SecurityBundle replaced the hand-written check
 docker/
-  Dockerfile               php:8.5-cli-alpine + ext-amqp + built-in server
-  compose.dev.yaml         dev stack: api + RabbitMQ
-  rabbitmq-config/         definitions.json (topology) + rabbitmq.conf
+  Dockerfile               alpine + php85 packages; stages base (no source) and release
+  dev/compose.yaml         dev stack: api + RabbitMQ + ssg-worker + mock
+  dev/collectives-mock/    content API stand-in, published-tree server, callback sink
+  dev/published/           bind mount the worker publishes into (gitignored)
+  dev/build_temp/          bind mount for the worker's build scratch (gitignored)
+  dev/rabbitmq-config/     definitions.json (topology) + rabbitmq.conf
 ```
