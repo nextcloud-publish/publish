@@ -22,10 +22,12 @@ RUN apk add --no-cache rabbitmq-c \
     && apk del .build-deps \
     && php -m | grep -qx amqp
 
-# Composer, handy for running composer commands inside the container
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
+
+COPY composer.json composer.lock* ./
+RUN composer install --no-interaction --no-progress --no-scripts
 
 EXPOSE 8080
 
