@@ -2,25 +2,18 @@ name: CI
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
-# A newer push to the same PR makes the run in flight irrelevant.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 env:
-  # The one supported PHP: what composer.json requires and what
-  # docker/Dockerfile ships. Keep those three in step.
   PHP_VERSION: '8.5'
-  # AMQP_DSN and PUBLISH_API_TOKEN have no default and are not set here, and no job needs them.
-  # lint:container leaves %env(...)% unresolved, and Messenger reads the DSN only when it connects.
-  # The tests use the in-memory:// transport from when@test and the token from .env.test.
-  #
-  # composer install fails without ctype, iconv and xml (composer.json) and amqp (symfony/amqp-messenger).
-  # mbstring is optional: symfony/polyfill-mbstring is used when it is missing.
   PHP_EXTENSIONS: ctype, iconv, amqp, xml, mbstring
 
 jobs:
@@ -37,9 +30,6 @@ jobs:
           extensions: ${{ env.PHP_EXTENSIONS }}
           coverage: none
 
-      # Before installing, so a malformed manifest fails fast and cheaply.
-      # --no-check-publish: this is a deployable app, not a Packagist package,
-      # so it deliberately has no name or description to validate.
       - name: Validate composer.json
         run: composer validate --strict --no-check-publish
 
@@ -52,9 +42,6 @@ jobs:
       - name: Lint YAML config
         run: php bin/console lint:yaml config
 
-      # Catches arguments whose types do not match the constructors they are
-      # injected into -- the failure this app's hand-wired DI is most exposed
-      # to, and one no other check here would notice.
       - name: Lint service container
         run: php bin/console lint:container
 
@@ -74,15 +61,12 @@ jobs:
       - name: Install dependencies
         uses: ramsey/composer-install@v3
 
-      # No broker service needed: messenger.yaml swaps the builds transport
-      # for in-memory:// under when@test, so dispatching never leaves PHP.
       - name: PHPUnit
         run: vendor/bin/phpunit
 
   image:
     name: Build and push image
     runs-on: ubuntu-latest
-    # Nothing gets published unless it lints and its tests pass.
     needs: [lint, test]
     permissions:
       contents: read
@@ -105,8 +89,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=ref,event=pr
-            type=sha,format=short
+            type=raw,value=${{ github.head_ref || github.ref_name }}
+          flavor: latest=false
 
       - name: Build and push
         uses: docker/build-push-action@v6
