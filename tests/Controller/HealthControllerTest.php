@@ -6,6 +6,7 @@ namespace App\Tests\Controller;
 
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
+/** Covers App\Controller\HealthController. */
 final class HealthControllerTest extends WebTestCase
 {
     public function testHealthReturnsOk(): void

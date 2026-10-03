@@ -13,3 +13,9 @@
 /phpunit.xml
 /.phpunit.cache/
 ###< phpunit/phpunit ###
+
+###> dev stack ###
+# Bind mounts of docker/dev/compose.yaml; ssg-worker runs as root and fills them with root-owned files.
+/docker/dev/build_temp/
+/docker/dev/published/
+###< dev stack ###

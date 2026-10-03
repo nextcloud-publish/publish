@@ -1,0 +1,91 @@
+name: publish-dev
+
+# Full dev stack. ssg-worker builds from a sibling checkout at ../../../ssg-worker,
+# so clone both repos into the same parent directory.
+#
+#   docker compose -f docker/dev/compose.yaml up --build
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: docker/dev/Dockerfile.dev
+    image: publish-dev-app
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      AMQP_HEARTBEAT: "10"
+      # Dev value, committed on purpose; per deployment use `openssl rand -hex 32`.
+      PUBLISH_API_TOKEN: "dev-api-token-0123456789"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../..:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: rabbitmq
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./rabbitmq-config/rabbitmq.conf:/etc/rabbitmq/conf.d/20-custom.conf:ro
+      - ./rabbitmq-config/definitions.json:/etc/rabbitmq/definitions.json:ro
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP
+      - "127.0.0.1:15672:15672"   # management UI
+    # The delays exchange must exist before a worker starts, or it dies on its first retry.
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmqctl list_exchanges --quiet --no-table-headers name | grep -qx delays"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  # Consumes q.builds, renders the site into published/, reports via callback_status_url.
+  ssg-worker:
+    build:
+      context: ../../../ssg-worker
+      dockerfile: docker/Dockerfile.dev
+    image: ssg-worker-dev
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      # Must match `heartbeat` in ./rabbitmq-config/rabbitmq.conf.
+      AMQP_HEARTBEAT: "10"
+      JOB_STORAGE_DIR: /opt/ssg/build_temp
+      PUBLISHED_DIR: /opt/ssg/published
+      # Where collectives-mock serves ./published (:8081); publish_url is built from it.
+      PUBLISH_BASE_URL: "http://127.0.0.1:8081"
+      MAX_DOWNLOAD_MB: "256"
+    volumes:
+      - ../../../ssg-worker:/app
+      # Keeps the image's vendor/ visible under the mount above. A host-side
+      # `composer require` needs a `docker compose build` to take effect.
+      - /app/vendor
+      - ./build_temp:/opt/ssg/build_temp
+      - ./published:/opt/ssg/published
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    # Mandatory: the image CMD passes --time-limit=3600, so the worker exits hourly.
+    restart: unless-stopped
+
+  # Serves published sites read-only (:8081) and replaces the Collectives API (:8082):
+  # content archives under /content/, status callbacks under /status/ logged to stdout.
+  collectives-mock:
+    build:
+      context: ./collectives-mock
+    image: collectives-mock-dev
+    ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8082:8082"
+    volumes:
+      - ./published:/opt/ssg/published:ro
+
+volumes:
+  rabbitmq-data:
