@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
+
+# Dev variant of ../Dockerfile: no COPY of the source, ./compose.yaml mounts it.
 FROM php:8.5-cli-alpine
 
-# PIE ships binary-only: tags are `bin` / `x.y.z-bin`, there is no `latest`.
 COPY --from=ghcr.io/php/pie:bin /pie /usr/bin/pie
 
-# unzip: PIE unpacks extensions from zip, and this base image has no unzip or git.
 RUN apk add --no-cache rabbitmq-c \
     && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS rabbitmq-c-dev unzip \
     && pie install --no-interaction --no-cache php-amqp/php-amqp \
@@ -15,12 +15,8 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
 
-# --no-scripts: Flex's auto-scripts shell out to bin/console, not copied yet.
 COPY composer.json composer.lock* ./
 RUN composer install --no-interaction --no-progress --no-scripts
-
-# The only difference from ./dev/Dockerfile.dev, which gets its source from a mount.
-COPY . .
 
 EXPOSE 8080
 
