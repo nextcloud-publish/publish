@@ -27,9 +27,7 @@ final class BuildController
     }
 
     /**
-     * Allow-list for static_site_id and slug, which ssg-worker uses as directory names.
-     * Rejecting here gives the caller a synchronous 400 instead of a failure callback after the worker's retry.
-     * Same expression as ssg-worker's JobWorkspace::SAFE_ID, so change both repos together.
+     * Allow-list for static_site_id and slug, which ssg-worker uses as directory names without checking them again.
      * Dots are excluded, so `..` cannot pass.
      */
     private const SAFE_ID = '/^[A-Za-z0-9_-]{1,128}$/';
@@ -37,34 +35,45 @@ final class BuildController
     /** Rendered into every page's header; escaped downstream, but not unbounded. */
     private const MAX_TITLE_LENGTH = 200;
 
-    /**
-     * Checks $payload for the required fields static_site_id, callback_status_url, content_download_url, slug and title.
-     *
-     * @param array $payload The decoded request body.
-     * @return bool true when all required fields are set, false when any is missing
-     */
-    private function incomingPayloadComplete(array $payload): bool
-    {
-        return isset($payload['static_site_id'])
-            && isset($payload['callback_status_url'])
-            && isset($payload['content_download_url'])
-            && isset($payload['slug'])
-            && isset($payload['title']);
-    }
+    /** Schemes accepted for content_download_url and callback_status_url. */
+    private const ALLOWED_URL_SCHEMES = ['http', 'https'];
 
     /**
-     * Finds the first of static_site_id and slug that is not a safe directory name.
-     * The is_string() check matters: a non-string would reach BuildJob's `string` type as a TypeError and be answered with a 503 instead of a 400.
+     * Checks $payload and returns why it is invalid, or null when it is valid.
+     * Every value must be a string: anything else would reach BuildJob's `string` type as a TypeError instead of a 400.
      *
-     * @param array $payload The decoded request body, already checked by incomingPayloadComplete().
-     * @return ?string the name of the first unsafe field, or null when both are safe
+     * @param array $payload The decoded request body.
+     * @return ?string the error message for the 400, or null when $payload is valid
      */
-    private function firstUnsafeField(array $payload): ?string
+    private function validatePayload(array $payload): ?string
     {
+        foreach (['static_site_id', 'slug', 'title', 'content_download_url', 'callback_status_url'] as $field) {
+            if (!isset($payload[$field])) {
+                return 'missing required fields';
+            }
+        }
+
         foreach (['static_site_id', 'slug'] as $field) {
             if (!\is_string($payload[$field]) || preg_match(self::SAFE_ID, $payload[$field]) !== 1) {
-                return $field;
+                return sprintf('%s must match [A-Za-z0-9_-]{1,128}', $field);
             }
+        }
+
+        foreach (['content_download_url', 'callback_status_url'] as $field) {
+            $url = $payload[$field];
+
+            // parse_url() yields null for a missing part and false for a URL it cannot parse at all.
+            $scheme = \is_string($url) ? strtolower((string) parse_url($url, PHP_URL_SCHEME)) : '';
+            $host = \is_string($url) ? parse_url($url, PHP_URL_HOST) : null;
+
+            if (!\in_array($scheme, self::ALLOWED_URL_SCHEMES, true) || !\is_string($host) || $host === '') {
+                return sprintf('%s must be an http or https URL with a host', $field);
+            }
+        }
+
+        $title = \is_string($payload['title']) ? trim($payload['title']) : '';
+        if ($title === '' || mb_strlen($title) > self::MAX_TITLE_LENGTH) {
+            return sprintf('title must be a non-empty string of at most %d characters', self::MAX_TITLE_LENGTH);
         }
 
         return null;
@@ -85,34 +94,15 @@ final class BuildController
         // toArray() and its JsonException are never reached without a valid token.
         $payload = $request->toArray();
 
-        if (!$this->incomingPayloadComplete($payload)) {
-            return new JsonResponse(
-                ['status' => 'invalid', 'error' => 'missing required fields'],
-                Response::HTTP_BAD_REQUEST,
-            );
-        }
-
-        if (($unsafe = $this->firstUnsafeField($payload)) !== null) {
-            return new JsonResponse(
-                ['status' => 'invalid', 'error' => sprintf('%s must match [A-Za-z0-9_-]{1,128}', $unsafe)],
-                Response::HTTP_BAD_REQUEST,
-            );
-        }
-
-        // is_string() for the same reason as in firstUnsafeField(): a non-string would become a 503.
-        $title = \is_string($payload['title']) ? trim($payload['title']) : '';
-        if ($title === '' || mb_strlen($title) > self::MAX_TITLE_LENGTH) {
-            return new JsonResponse(
-                ['status' => 'invalid', 'error' => sprintf('title must be a non-empty string of at most %d characters', self::MAX_TITLE_LENGTH)],
-                Response::HTTP_BAD_REQUEST,
-            );
+        if (($error = $this->validatePayload($payload)) !== null) {
+            return new JsonResponse(['status' => 'invalid', 'error' => $error], Response::HTTP_BAD_REQUEST);
         }
 
         $build = new BuildJob(
             build_id: Uuid::v7()->toRfc4122(),
             static_site_id: $payload['static_site_id'],
             slug: $payload['slug'],
-            title: $title,
+            title: trim($payload['title']),
             content_download_url: $payload['content_download_url'],
             callback_status_url: $payload['callback_status_url'],
             created_at: (new \DateTimeImmutable('now'))->format(\DateTimeInterface::ATOM),

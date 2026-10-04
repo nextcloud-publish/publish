@@ -150,6 +150,56 @@ final class BuildControllerTest extends WebTestCase
     }
 
     /**
+     * Provides every invalid value once for content_download_url and once for callback_status_url.
+     *
+     * @return array<string, array{string, mixed}> field name and invalid value, keyed by case name
+     */
+    public static function provideInvalidUrls(): array
+    {
+        $cases = [
+            'file scheme' => 'file:///etc/passwd',
+            'ftp scheme' => 'ftp://example.org/content.tar.gz',
+            'no scheme' => 'example.org/content.tar.gz',
+            'no host' => 'https:///content.tar.gz',
+            'empty' => '',
+            'integer' => 42,
+            'array' => ['not', 'a', 'string'],
+        ];
+
+        $out = [];
+        foreach ($cases as $name => $value) {
+            $out['content_download_url: ' . $name] = ['content_download_url', $value];
+            $out['callback_status_url: ' . $name] = ['callback_status_url', $value];
+        }
+
+        return $out;
+    }
+
+    /** ssg-worker fetches and calls both URLs without checking them again, so they are rejected here with a synchronous 400. */
+    #[DataProvider('provideInvalidUrls')]
+    public function testBuildRejectedOnAnInvalidUrl(string $field, mixed $value): void
+    {
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', [...self::PAYLOAD, $field => $value], self::AUTH);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertStringContainsString($field, (string) $client->getResponse()->getContent());
+        self::assertCount(0, static::getContainer()->get('messenger.transport.builds')->getSent());
+    }
+
+    public function testAPlainHttpUrlIsAccepted(): void
+    {
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', [
+            ...self::PAYLOAD,
+            'content_download_url' => 'http://example.org/content.tar.gz',
+            'callback_status_url' => 'http://example.org/status',
+        ], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+    }
+
+    /**
      * Provides title values that are present but not usable.
      *
      * @return array<string, array{mixed}> the title value, keyed by case name

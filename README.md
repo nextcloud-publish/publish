@@ -19,7 +19,8 @@ else in the body is ignored.
 
 A `400` is returned when a required field is missing, when `static_site_id` or `slug`
 is not a string matching `[A-Za-z0-9_-]{1,128}` (both become directory names in
-`ssg-worker`), or when `title` is not a string, blank, or longer than 200 characters. The `202` is only sent after the broker
+`ssg-worker`), when `content_download_url` or `callback_status_url` is not an `http` or
+`https` URL with a host, or when `title` is not a string, blank, or longer than 200 characters. The `202` is only sent after the broker
 confirms the publish, so it is never returned for a job that was not actually queued.
 
 ## Authentication
