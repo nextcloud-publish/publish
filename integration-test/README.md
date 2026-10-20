@@ -23,7 +23,7 @@ install their PHP dependencies inside their containers.
 ## Run it
 
 ```bash
-docker compose -f integration-test/docker-compose.yml up --build
+docker compose -f integration-test/docker-compose.yml -f integration-test/docker-compose.nextcloud-docker-dev.yml up --build
 ```
 
 The `api` container runs as uid/gid `1000` so the `vendor/` and `var/` it
