@@ -18,6 +18,13 @@ security:
             pattern: ^/health$
             security: false
 
+        # A published site is a public page Collectives links to directly --
+        # requiring the API's own bearer token here would make every
+        # published link unusable to anyone but publish's own caller.
+        published_sites:
+            pattern: ^/publish/
+            security: false
+
         main:
             pattern: ^/
             # No session and no cookie; the token is checked on every request, so CSRF protection is not needed.
@@ -31,6 +38,6 @@ security:
             # ExceptionListener::throwUnauthorizedException(), without a WWW-Authenticate header.
 
     # Denies every path to a caller without ROLE_API, so a new endpoint is protected without extra config.
-    # /health is not listed: its `security: false` firewall skips access_control, so a rule for it would never be evaluated.
+    # /health and /publish are not listed: their `security: false` firewalls skip access_control, so a rule for them would never be evaluated.
     access_control:
         - { path: ^/, roles: ROLE_API }

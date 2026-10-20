@@ -30,3 +30,12 @@ services:
             # fails loudly (Symfony cannot resolve the env var); blank fails
             # closed (every request gets a 401).
             $apiToken: '%env(PUBLISH_API_TOKEN)%'
+
+    App\Storage\JobWorkspace:
+        arguments:
+            # Root of the volume shared with ssg-worker -- must name the same
+            # directory the worker's own JobWorkspace uses, or this serves
+            # from somewhere nothing writes to. No default: a missing
+            # variable should fail loudly, not silently 404 every request.
+            # Set in integration-test/docker-compose.yml.
+            $baseDir: '%env(JOB_STORAGE_DIR)%'
