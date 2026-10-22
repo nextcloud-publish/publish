@@ -1,0 +1,27 @@
+# Override for testing against a real nextcloud-docker-dev instance instead of
+# the `content` fixture service. See HANDOVER-nextcloud-docker-dev.md for why
+# this is needed and how to verify it worked.
+#
+#   docker compose \
+#     -f integration-test/docker-compose.yml \
+#     -f integration-test/docker-compose.nextcloud-docker-dev.yml \
+#     up --build
+#
+# Only `worker` calls out to Nextcloud today (it downloads content_download_url
+# via ContentDownloader); `api` only enqueues and never dials out, so it is left
+# off this network.
+#
+# It is important to allow local remote servers on nextcloud side:
+# scripts/occ.sh -- config:system:set allow_local_remote_servers --value=true --type=boolean
+services:
+  worker:
+    networks:
+      - default
+      - nextcloud
+
+networks:
+  nextcloud:
+    external: true
+    # <nextcloud-docker-dev project>_default, e.g. "master_default" if that
+    # repo's .env has COMPOSE_PROJECT_NAME=master. Adjust to match.
+    name: master_default

@@ -13,3 +13,9 @@
 /phpunit.xml
 /.phpunit.cache/
 ###< phpunit/phpunit ###
+
+###> app ###
+# Rendered output copied off the integration stack's job volume for a look in
+# a browser; see integration-test/README.md.
+/integration-test/rendered/
+###< app ###

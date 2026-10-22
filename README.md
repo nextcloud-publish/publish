@@ -5,18 +5,28 @@ build requests and puts them on RabbitMQ for `ssg-worker` to pick up.
 
 ## Endpoints
 
-| Method | Path      | Response                                                            |
-| ------ | --------- | ------------------------------------------------------------------- |
-| GET    | `/health` | `{"status":"ok"}` — public, no token                                |
-| POST   | `/build`  | `202` `{"status":"enqueued"}`                                       |
-|        |           | `400` `{"status":"invalid",...}` — a required field is missing      |
-|        |           | `401` empty body — missing or invalid token, see below              |
-|        |           | `503` `{"status":"error",...}` — the broker was unreachable         |
+| Method | Path                                | Response                                                            |
+| ------ | ------------------------------------ | ------------------------------------------------------------------- |
+| GET    | `/health`                           | `{"status":"ok"}` — public, no token                                |
+| POST   | `/build`                            | `202` `{"status":"enqueued"}`                                       |
+|        |                                      | `400` `{"status":"invalid",...}` — a required field is missing      |
+|        |                                      | `401` empty body — missing or invalid token, see below              |
+|        |                                      | `503` `{"status":"error",...}` — the broker was unreachable         |
+| GET    | `/publish/{static_site_id}[/{path}]` | a build's rendered output — public, no token, see below             |
+|        |                                      | `404` — unknown site, unsafe id, or `{path}` outside the site's own output |
 
 `POST /build` requires `static_site_id`, `slug`, `content_download_url` and
 `callback_status_url`. Anything else in the body is ignored. The `202` is only sent
 after the broker confirms the publish, so it is never returned for a job that was not
 actually queued.
+
+`GET /publish/{static_site_id}` serves the site `ssg-worker` rendered for that build —
+the same URL reported as `publish_url` in its success callback to `callback_status_url`.
+`{path}` addresses anything under the site besides its root page (`/publish/{id}/Cats`,
+`/publish/{id}/style.css`); omitting it serves `index.html`, and a directory-shaped path
+serves that directory's own `index.html`. Reads from `JOB_STORAGE_DIR`, so it only ever
+resolves once a build has actually finished — there is no notion of a build still in
+progress.
 
 ## Authentication
 
@@ -66,6 +76,10 @@ it. It has its own firewall with `security: false`, which means no authenticator
 inspects its requests: a probe that sends a stale or malformed `Authorization` header
 still gets a `200`. A health check that can fail authentication is useless to a load
 balancer.
+
+`/publish/` is public for a different reason: it serves pages meant to be shared and
+opened by anyone, so it has its own `security: false` firewall too — requiring
+`PUBLISH_API_TOKEN` to view a published site would defeat the point of publishing it.
 
 `docs/security-bundle.md` records why this replaced the hand-written check, and what it
 cost.
@@ -165,12 +179,14 @@ config/
   packages/messenger.yaml  builds transport + BuildJob routing
   packages/security.yaml   the firewalls, and the one access_control rule
 public/index.php           Front controller
-config/services.yaml       binds PUBLISH_API_TOKEN into ApiTokenHandler
+config/services.yaml       binds PUBLISH_API_TOKEN and JOB_STORAGE_DIR
 src/
-  Controller/              HealthController, BuildController
+  Controller/              HealthController, BuildController, PublishedSiteController
   Security/ApiTokenHandler.php  compares the token, yields the API identity
+  Storage/JobWorkspace.php  resolves a build's output/ under JOB_STORAGE_DIR
   Message/BuildJob.php     the message shape for q.builds
-tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest
+tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest, PublishedSiteControllerTest
+tests/Storage/             JobWorkspaceTest
 tests/Security/            ApiTokenHandlerTest
 docs/security-bundle.md    why SecurityBundle replaced the hand-written check
 docker/

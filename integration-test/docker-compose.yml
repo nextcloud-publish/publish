@@ -1,0 +1,184 @@
+# End-to-end stack: publish + ssg-worker + the broker they share.
+#
+# docker/compose.dev.yaml runs the API alone. This file adds the consumer, so a
+# POST /build can be followed all the way to rendered HTML on the shared job
+# volume. The two files claim the same host ports (8080, 5672, 15672) -- run one
+# or the other, never both.
+#
+# Requires ssg-worker checked out next to this repo:
+#
+#   <workspace>/
+#     publish/        <- this repo, compose file lives in integration-test/
+#     ssg-worker/     <- built from ../../ssg-worker below
+#
+# Neither repo publishes a stable image tag (CI pushes only per-PR and per-SHA
+# tags to GHCR), so both services are built from local source.
+#
+#   docker compose -f integration-test/docker-compose.yml up --build
+#
+name: publish-integration
+
+services:
+  # Owns the topology. definitions.json is imported at boot and is the single
+  # source of truth, which is why neither application declares anything
+  # (auto_setup: false on both sides). Config is reused from the dev stack
+  # rather than copied, so the two cannot drift.
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: rabbitmq
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ../docker/rabbitmq-config/rabbitmq.conf:/etc/rabbitmq/conf.d/20-custom.conf:ro
+      - ../docker/rabbitmq-config/definitions.json:/etc/rabbitmq/definitions.json:ro
+    ports:
+      - "127.0.0.1:5672:5672" # AMQP
+      - "127.0.0.1:15672:15672" # management UI
+    # The dev stack gets away with a bare depends_on because the API only opens
+    # a connection when a request arrives, by which time the broker is up. The
+    # worker connects during boot, so it needs the broker to be genuinely ready
+    # -- not merely started -- or it crash-loops on first start.
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+
+  # The API. Its Dockerfile deliberately COPYs no source and runs no composer
+  # install -- the image is a PHP+ext-amqp runtime, and the code arrives through
+  # the bind mount below, so edits are live without a rebuild.
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      # Must match `heartbeat` in docker/rabbitmq-config/rabbitmq.conf.
+      AMQP_HEARTBEAT: "10"
+      # Dev value, committed on purpose -- it is the bearer token callers send.
+      # Generate a real one per deployment with `openssl rand -hex 32`.
+      PUBLISH_API_TOKEN: "dev-api-token-0123456789"
+      # Backs App\Storage\JobWorkspace, which GET /publish/{id} reads from --
+      # must name the same directory the worker writes to.
+      JOB_STORAGE_DIR: /srv/jobs
+      # composer needs a writable home, which a non-root uid does not have here.
+      COMPOSER_HOME: /tmp/composer
+    # Runs as the host user so vendor/ and var/ land in the bind-mounted repo
+    # owned by you, not by root -- otherwise a later host-side `composer install`
+    # cannot write to its own vendor/. Override when your uid is not 1000:
+    #   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f ... up
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # Installing inside the container instead of on the host means the host
+    # never needs ext-amqp (composer install refuses to run without it; see the
+    # README's Requirements). --no-scripts skips Flex's cache:clear/assets:install,
+    # which this app does not need and which the container regenerates on boot.
+    command: >
+      sh -c "composer install --no-interaction --no-progress --no-scripts &&
+             exec php -S 0.0.0.0:8080 -t public public/index.php"
+    ports:
+      - "8080:8080"
+    volumes:
+      # vendor/ deliberately has no volume of its own: it lives in the bind
+      # mount, so the host and the container share one copy instead of
+      # maintaining two that silently drift.
+      - ../:/app
+      # GET /publish/{id} (App\Controller\PublishedSiteController) reads a
+      # build's output/ from here. Only readable because `worker` below now
+      # runs as the same uid as this container -- see job-storage-init.
+      - job-storage:/srv/jobs
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      job-storage-init:
+        condition: service_completed_successfully
+
+  # One-shot: ssg-worker's Helper::ensureDir creates each job's directories at
+  # mode 0750, so they are only readable by their owner. A fresh named volume
+  # (and any job directories left over from before `worker` ran as a fixed
+  # uid) is root-owned, which would leave `api` unable to read anything
+  # worker writes. Chowning once, before either service starts, means they
+  # only have to agree on a uid (below) rather than on a permission scheme.
+  job-storage-init:
+    image: busybox
+    user: root
+    command: ["chown", "-R", "${HOST_UID:-1000}:${HOST_GID:-1000}", "/srv/jobs"]
+    volumes:
+      - job-storage:/srv/jobs
+
+  # The consumer. Lives in a sibling repo that ships a Dockerfile but no compose
+  # file of its own -- by design, since it cannot run without this broker.
+  worker:
+    build:
+      context: ../../ssg-worker
+      dockerfile: Dockerfile
+    # Same uid as `api`, and for the same underlying reason: job-storage-init
+    # chowns the shared volume to this uid, so api can read what worker
+    # writes under it without both services having to agree on a group or a
+    # wider mode than Helper::ensureDir's 0750.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
+      # REQUIRED despite what ssg-worker's README says: its messenger.yaml reads
+      # %env(int:AMQP_HEARTBEAT)% and its .env defines no default, so an unset
+      # value fails container compilation rather than falling back to 10.
+      AMQP_HEARTBEAT: "10"
+      # Same directory the api service mounts, which is the point of the volume.
+      JOB_STORAGE_DIR: /srv/jobs
+      MAX_DOWNLOAD_MB: "256"
+      # Combined with static_site_id into the publish_url sent back to
+      # Collectives in the success callback. Matches the api service's own
+      # host port: GET /publish/{id} is what actually serves it.
+      PUBLIC_SITE_BASE_URL: "http://localhost:8080"
+    volumes:
+      - ../../ssg-worker:/app
+      # ANONYMOUS, unlike the api's: this image builds vendor/ at image-build
+      # time, so the mount only has to stop the bind mount above from shadowing
+      # it. Being anonymous, `up --build` reseeds it from the fresh image.
+      - /app/vendor
+      - job-storage:/srv/jobs
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      job-storage-init:
+        condition: service_completed_successfully
+    # messenger:consume exits on a lost connection and on its own memory/time
+    # limits. Restarting is the supervisor the dev stack would otherwise lack.
+    restart: unless-stopped
+
+  # Serves the fixture tree as the tar.gz a build job points at, so an
+  # end-to-end run needs nothing outside this network. Packed at container
+  # start rather than committed, so editing a fixture .md only needs a restart.
+  # Reachable from the host on 8081 to check what the worker will fetch.
+  content:
+    # nginx rather than `alpine` + busybox httpd: Alpine's busybox is built
+    # without the httpd applet, and the package that used to supply it
+    # (busybox-extras) is gone, so that route would need an apk install on
+    # every start. nginx:alpine serves /usr/share/nginx/html on :80 as shipped.
+    image: nginx:alpine
+    # Overridden explicitly so the image's entrypoint cannot decide whether to
+    # run its nginx init steps based on what the command happens to start with.
+    entrypoint: ["/bin/sh", "-c"]
+    # A one-element LIST, not a string: compose shell-splits a string command
+    # into argv, which would hand `sh -c` only the first word as its script.
+    command:
+      - |
+        set -e
+        tar -czf /usr/share/nginx/html/sample-site.tar.gz -C /fixtures .
+        exec nginx -g 'daemon off;'
+    volumes:
+      - ./fixtures/sample-site:/fixtures:ro
+    ports:
+      - "127.0.0.1:8081:80"
+
+volumes:
+  rabbitmq-data:
+  # The shared job volume: the worker writes <static_site_id>/input + /output
+  # here, at mode 0750. Both api and worker run as the same uid (see
+  # job-storage-init), so api can read what worker writes.
+  job-storage:
