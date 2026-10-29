@@ -7,6 +7,7 @@ namespace App\Tests\Controller;
 use App\Message\BuildJob;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 use Symfony\Component\Uid\Uuid;
 
@@ -31,6 +32,19 @@ final class BuildControllerTest extends WebTestCase
         'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
     ];
 
+    /**
+     * Returns the envelopes sent to the builds transport, which when@test makes in-memory.
+     *
+     * @return Envelope[]
+     */
+    private static function sentToBuilds(): array
+    {
+        $transport = static::getContainer()->get('messenger.transport.builds');
+        self::assertInstanceOf(InMemoryTransport::class, $transport);
+
+        return $transport->getSent();
+    }
+
     public function testBuildEnqueuedOnCompletePayload(): void
     {
         $client = static::createClient();
@@ -51,10 +65,7 @@ final class BuildControllerTest extends WebTestCase
         );
 
         // The message went through the real bus and routing config, not a test double.
-        $transport = static::getContainer()->get('messenger.transport.builds');
-        self::assertInstanceOf(InMemoryTransport::class, $transport);
-
-        $sent = $transport->getSent();
+        $sent = self::sentToBuilds();
         self::assertCount(1, $sent);
 
         $build = $sent[0]->getMessage();
@@ -80,7 +91,8 @@ final class BuildControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(202);
 
-        $build = static::getContainer()->get('messenger.transport.builds')->getSent()[0]->getMessage();
+        $build = self::sentToBuilds()[0]->getMessage();
+        self::assertInstanceOf(BuildJob::class, $build);
         self::assertSame('my-team-handbook', $build->slug);
         self::assertSame('My Team Handbook', $build->title);
     }
@@ -130,8 +142,7 @@ final class BuildControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(400);
         self::assertStringContainsString($field, (string) $client->getResponse()->getContent());
 
-        $transport = static::getContainer()->get('messenger.transport.builds');
-        self::assertCount(0, $transport->getSent(), 'an unsafe name must never be enqueued');
+        self::assertCount(0, self::sentToBuilds(), 'an unsafe name must never be enqueued');
     }
 
     /** Without the is_string() check, the TypeError from BuildJob would be caught as a 503. */
@@ -184,7 +195,7 @@ final class BuildControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(400);
         self::assertStringContainsString($field, (string) $client->getResponse()->getContent());
-        self::assertCount(0, static::getContainer()->get('messenger.transport.builds')->getSent());
+        self::assertCount(0, self::sentToBuilds());
     }
 
     public function testAPlainHttpUrlIsAccepted(): void
@@ -228,7 +239,7 @@ final class BuildControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(400);
         self::assertStringContainsString('title', (string) $client->getResponse()->getContent());
-        self::assertCount(0, static::getContainer()->get('messenger.transport.builds')->getSent());
+        self::assertCount(0, self::sentToBuilds());
     }
 
     public function testBuildRejectedOnAMissingTitle(): void
@@ -263,9 +274,7 @@ final class BuildControllerTest extends WebTestCase
             (string) $client->getResponse()->getContent(),
         );
 
-        $transport = static::getContainer()->get('messenger.transport.builds');
-        self::assertInstanceOf(InMemoryTransport::class, $transport);
-        self::assertCount(0, $transport->getSent());
+        self::assertCount(0, self::sentToBuilds());
     }
 
     /**
@@ -299,9 +308,7 @@ final class BuildControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(401);
         self::assertSame($challenge, $client->getResponse()->headers->get('WWW-Authenticate'));
 
-        $transport = static::getContainer()->get('messenger.transport.builds');
-        self::assertInstanceOf(InMemoryTransport::class, $transport);
-        self::assertCount(0, $transport->getSent());
+        self::assertCount(0, self::sentToBuilds());
     }
 
     public function testMalformedJsonWithoutATokenIsRejectedBeforeItIsParsed(): void

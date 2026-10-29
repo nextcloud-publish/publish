@@ -31,6 +31,12 @@ final class BuildEnqueueTest extends TestCase
         'title' => 'Some Collective',
     ];
 
+    /**
+     * Builds a POST /build request with $payload as its JSON body.
+     *
+     * @param array<string, mixed> $payload The request body.
+     * @return Request the request
+     */
     private static function request(array $payload): Request
     {
         return Request::create(

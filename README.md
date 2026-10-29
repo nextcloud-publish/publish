@@ -218,6 +218,7 @@ src/
   Message/BuildJob.php     the message shape for q.builds
 tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest
 tests/Security/            ApiTokenHandlerTest
+phpstan.dist.neon          PHPStan level and paths
 docs/security-bundle.md    why SecurityBundle replaced the hand-written check
 docker/
   Dockerfile               alpine + php85 packages; stages base (no source) and release

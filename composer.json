@@ -23,6 +23,9 @@
         "symfony/yaml": "8.1.*"
     },
     "require-dev": {
+        "phpstan/phpstan": "^2.3",
+        "phpstan/phpstan-phpunit": "^2.1",
+        "phpstan/phpstan-symfony": "^2.1",
         "phpunit/phpunit": "^13.3",
         "psy/psysh": "^0.12.24",
         "symfony/browser-kit": "8.1.*",
