@@ -1,17 +1,17 @@
 # publish-api
 
-A minimal Symfony 8.1 REST API. No database, no templating — just JSON. It accepts
-build requests and puts them on RabbitMQ for `ssg-worker` to pick up.
+A Symfony 8.1 REST API without a database. It accepts build requests and puts them on
+RabbitMQ for `ssg-worker` to pick up.
 
 ## Endpoints
 
 | Method | Path      | Response                                                            |
 | ------ | --------- | ------------------------------------------------------------------- |
-| GET    | `/health` | `{"status":"ok"}` — public, no token                                |
+| GET    | `/health` | `{"status":"ok"}` -- public, no token                               |
 | POST   | `/build`  | `202` `{"status":"enqueued"}`                                       |
-|        |           | `400` `{"status":"invalid",...}` — see below                        |
-|        |           | `401` — missing or invalid token, see below                         |
-|        |           | `503` `{"status":"error",...}` — the broker was unreachable         |
+|        |           | `400` `{"status":"invalid",...}` -- see below                       |
+|        |           | `401` -- missing or invalid token, see below                        |
+|        |           | `503` `{"status":"error",...}` -- the broker was unreachable        |
 
 `POST /build` requires `static_site_id`, `slug`, `title`, `content_download_url` and
 `callback_status_url`. `title` is trimmed and must be 1 to 200 characters long. Anything
@@ -48,7 +48,7 @@ openssl rand -hex 32
 ```
 
 The scheme is matched case-sensitively and the token must consist of
-`A-Z a-z 0-9 - _ + ~ / .` with optional trailing `=` — `openssl rand -hex 32`, base64 and
+`A-Z a-z 0-9 - _ + ~ / .` with optional trailing `=`. `openssl rand -hex 32`, base64 and
 base64url all qualify. `bearer <token>` in lower case does not.
 
 A `401` looks different depending on why the request failed:
@@ -60,22 +60,15 @@ A `401` looks different depending on why the request failed:
 
 Callers should rely on the status code only.
 
-Authentication is a firewall, configured in `config/packages/security.yaml` — not
-something each controller opts into. One `access_control` rule requires `ROLE_API` for
-every path, so **a new endpoint is protected by default** and opting out means editing
-that file. The check runs on `kernel.request`, before the controller is resolved, so a
-request without a valid token never reaches any application code — a malformed JSON body
-without a token is a `401`, not a `500`. Routing runs earlier still, so an unregistered
-path is a `404` rather than a `401`.
+Authentication is a firewall in `config/packages/security.yaml`. One `access_control`
+rule requires `ROLE_API` for every path, so a new endpoint is protected unless that file
+says otherwise. The check runs on `kernel.request`, before the controller is resolved: a
+malformed JSON body without a token is a `401`, not a `500`. Routing runs earlier, so an
+unregistered path is a `404`.
 
-`/health` deliberately stays public so container healthchecks and monitoring can reach
-it. It has its own firewall with `security: false`, which means no authenticator ever
-inspects its requests: a probe that sends a stale or malformed `Authorization` header
-still gets a `200`. A health check that can fail authentication is useless to a load
-balancer.
-
-`docs/security-bundle.md` records why this replaced the hand-written check, and what it
-cost.
+`/health` is public for container healthchecks and monitoring. Its firewall has
+`security: false`, so a probe with a stale or malformed `Authorization` header still gets
+a `200`.
 
 > **Deploying behind Apache:** Apache with PHP-FPM strips the `Authorization` header
 > unless `CGIPassAuth On` is set for the vhost (or it is forwarded with a
@@ -87,7 +80,7 @@ cost.
 Enqueueing goes through [Symfony Messenger](https://symfony.com/doc/current/messenger.html):
 `BuildController` dispatches an `App\Message\BuildJob` and
 `config/packages/messenger.yaml` routes it to the `builds` transport. There is no
-handler in this application — the routing entry is what makes `dispatch()` publish to
+handler in this application: the routing entry is what makes `dispatch()` publish to
 the broker instead of handling the message locally.
 
 The transport publishes to the default exchange with `q.builds` as the routing key, and
@@ -138,7 +131,7 @@ curl -s -X POST localhost:8080/build \
   -d '{"static_site_id":"11f5b798-6f34-4951-ad8b-bfd623ded5c2","slug":"demo","content_download_url":"https://example.org/a.tar.gz","callback_status_url":"https://example.org/status","title":"Demo"}'
 ```
 
-`PUBLISH_API_TOKEN` has to be set for `POST /build` to work at all — see
+`PUBLISH_API_TOKEN` has to be set for `POST /build` to work, see
 [Authentication](#authentication). `/health` does not need it.
 
 ## Docker (dev stack)
@@ -234,7 +227,6 @@ tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnque
 tests/Security/            ApiTokenHandlerTest
 phpstan.dist.neon          PHPStan level and paths
 .pre-commit-config.yaml    the hooks run before each commit
-docs/security-bundle.md    why SecurityBundle replaced the hand-written check
 docker/
   Dockerfile               alpine + php85 packages; stages base (no source) and release
   dev/compose.yaml         dev stack: api + RabbitMQ + ssg-worker + mock
