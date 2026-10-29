@@ -204,6 +204,20 @@ Stage `release` holds the source and has no `CMD`: a deployment sets the server.
 php bin/phpunit
 ```
 
+PHPStan checks `src/` and `tests/` at level 10. It reads the service container from
+`var/cache/dev/`, so warm the cache first:
+
+```bash
+php bin/console cache:warmup && vendor/bin/phpstan analyse
+```
+
+[pre-commit](https://pre-commit.com/) runs the CI lint steps, PHPStan and the tests before each commit.
+It needs PHP 8.5 and `composer install` on the host. Install the hook once:
+
+```bash
+pre-commit install
+```
+
 ## Layout
 
 ```text
@@ -219,6 +233,7 @@ src/
 tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest
 tests/Security/            ApiTokenHandlerTest
 phpstan.dist.neon          PHPStan level and paths
+.pre-commit-config.yaml    the hooks run before each commit
 docs/security-bundle.md    why SecurityBundle replaced the hand-written check
 docker/
   Dockerfile               alpine + php85 packages; stages base (no source) and release
