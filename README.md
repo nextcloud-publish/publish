@@ -184,7 +184,7 @@ curl -I http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/   
 The collectives-mock log should then show:
 
 ```text
-CALLBACK PUT /status/1234 -> 204 body={"status":"published","result":{"publish_url":"http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/"}}
+CALLBACK PUT /status/1234 -> 204 body={"status":"published","data":{"publish_url":"http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/"}}
 ```
 
 The project directory is bind-mounted at `/publish`, so code changes are picked up
