@@ -117,7 +117,7 @@ and its `type` header back into its own `App\Message\BuildJob`.
 
 ## Requirements
 
-- PHP >= 8.4.1 and [Composer](https://getcomposer.org/) for local runs. `ext-ctype`,
+- PHP >= 8.5 and [Composer](https://getcomposer.org/) for local runs. `ext-ctype`,
   `ext-iconv` and `ext-xml` are declared in `composer.json`; the last one comes from
   `symfony/security-bundle`.
 - [Docker](https://www.docker.com/) with Compose v2 for the containerized dev stack
