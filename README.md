@@ -1,22 +1,29 @@
 # publish-api
 
-A minimal Symfony 8.1 REST API. No database, no templating — just JSON. It accepts
-build requests and puts them on RabbitMQ for `ssg-worker` to pick up.
+A Symfony 8.1 REST API without a database. It accepts build requests and puts them on
+RabbitMQ for `ssg-worker` to pick up.
 
 ## Endpoints
 
 | Method | Path      | Response                                                            |
 | ------ | --------- | ------------------------------------------------------------------- |
-| GET    | `/health` | `{"status":"ok"}` — public, no token                                |
+| GET    | `/health` | `{"status":"ok"}` -- public, no token                               |
 | POST   | `/build`  | `202` `{"status":"enqueued"}`                                       |
-|        |           | `400` `{"status":"invalid",...}` — a required field is missing      |
-|        |           | `401` empty body — missing or invalid token, see below              |
-|        |           | `503` `{"status":"error",...}` — the broker was unreachable         |
+|        |           | `400` `{"status":"invalid",...}` -- see below                       |
+|        |           | `401` -- missing or invalid token, see below                        |
+|        |           | `503` `{"status":"error",...}` -- the broker was unreachable        |
 
-`POST /build` requires `static_site_id`, `slug`, `content_download_url` and
-`callback_status_url`. Anything else in the body is ignored. The `202` is only sent
-after the broker confirms the publish, so it is never returned for a job that was not
-actually queued.
+`POST /build` requires `static_site_id`, `slug`, `title`, `content_download_url` and
+`callback_status_url`. `title` is trimmed and must be 1 to 200 characters long. Anything
+else in the body is ignored.
+
+A `400` is returned when a required field is missing, when `static_site_id` or `slug`
+is not a string matching `[A-Za-z0-9_-]{1,128}`, when `content_download_url` or
+`callback_status_url` is not an `http` or `https` URL with a host, or when `title` is not
+a string, blank, or longer than 200 characters. `ssg-worker` uses `static_site_id` and
+`slug` as directory names without checking them again, so this API is the only check.
+
+The `202` is only sent after the broker confirms the publish.
 
 ## Authentication
 
@@ -41,7 +48,7 @@ openssl rand -hex 32
 ```
 
 The scheme is matched case-sensitively and the token must consist of
-`A-Z a-z 0-9 - _ + ~ / .` with optional trailing `=` — `openssl rand -hex 32`, base64 and
+`A-Z a-z 0-9 - _ + ~ / .` with optional trailing `=`. `openssl rand -hex 32`, base64 and
 base64url all qualify. `bearer <token>` in lower case does not.
 
 A `401` looks different depending on why the request failed:
@@ -53,22 +60,15 @@ A `401` looks different depending on why the request failed:
 
 Callers should rely on the status code only.
 
-Authentication is a firewall, configured in `config/packages/security.yaml` — not
-something each controller opts into. One `access_control` rule requires `ROLE_API` for
-every path, so **a new endpoint is protected by default** and opting out means editing
-that file. The check runs on `kernel.request`, before the controller is resolved, so a
-request without a valid token never reaches any application code — a malformed JSON body
-without a token is a `401`, not a `500`. Routing runs earlier still, so an unregistered
-path is a `404` rather than a `401`.
+Authentication is a firewall in `config/packages/security.yaml`. One `access_control`
+rule requires `ROLE_API` for every path, so a new endpoint is protected unless that file
+says otherwise. The check runs on `kernel.request`, before the controller is resolved: a
+malformed JSON body without a token is a `401`, not a `500`. Routing runs earlier, so an
+unregistered path is a `404`.
 
-`/health` deliberately stays public so container healthchecks and monitoring can reach
-it. It has its own firewall with `security: false`, which means no authenticator ever
-inspects its requests: a probe that sends a stale or malformed `Authorization` header
-still gets a `200`. A health check that can fail authentication is useless to a load
-balancer.
-
-`docs/security-bundle.md` records why this replaced the hand-written check, and what it
-cost.
+`/health` is public for container healthchecks and monitoring. Its firewall has
+`security: false`, so a probe with a stale or malformed `Authorization` header still gets
+a `200`.
 
 > **Deploying behind Apache:** Apache with PHP-FPM strips the `Authorization` header
 > unless `CGIPassAuth On` is set for the vhost (or it is forwarded with a
@@ -80,12 +80,12 @@ cost.
 Enqueueing goes through [Symfony Messenger](https://symfony.com/doc/current/messenger.html):
 `BuildController` dispatches an `App\Message\BuildJob` and
 `config/packages/messenger.yaml` routes it to the `builds` transport. There is no
-handler in this application — the routing entry is what makes `dispatch()` publish to
+handler in this application: the routing entry is what makes `dispatch()` publish to
 the broker instead of handling the message locally.
 
 The transport publishes to the default exchange with `q.builds` as the routing key, and
 declares no topology: the broker imports the queue, user and permissions from
-`docker/rabbitmq-config/definitions.json` at boot and owns them, which is why
+`docker/dev/rabbitmq-config/definitions.json` at boot and owns them, which is why
 `auto_setup` is off.
 
 Messages are serialized as JSON by Messenger's built-in `symfony_serializer` (not the
@@ -93,9 +93,15 @@ framework default, which is PHP `serialize()`). `App\Message\BuildJob` therefore
 the message shape, and its property names are the JSON keys:
 
 ```json
-{ "build_id": "...", "static_site_id": "...", "slug": "...",
+{ "build_id": "...", "static_site_id": "...", "slug": "...", "title": "...",
   "content_download_url": "...", "callback_status_url": "...", "created_at": "..." }
 ```
+
+`build_id` is a UUID v7 generated by this API for each request.
+
+`ssg-worker`'s `BuildJob` takes every one of these as a required constructor argument,
+`title` included. A message missing any of them fails to decode and is dropped without
+a status callback, so the two classes have to change together.
 
 Messenger also adds `type` and `X-Message-Stamp-*` AMQP headers alongside the body.
 
@@ -104,17 +110,14 @@ and its `type` header back into its own `App\Message\BuildJob`.
 
 ## Requirements
 
-- PHP >= 8.4.1 and [Composer](https://getcomposer.org/) for local runs. `ext-ctype`,
+- PHP >= 8.5 and [Composer](https://getcomposer.org/) for local runs. `ext-ctype`,
   `ext-iconv` and `ext-xml` are declared in `composer.json`; the last one comes from
   `symfony/security-bundle`.
 - [Docker](https://www.docker.com/) with Compose v2 for the containerized dev stack
-- `ext-amqp` to actually publish. `symfony/amqp-messenger` requires it, so `composer
-  install` refuses to run on a host without it; pass
-  `--ignore-platform-req=ext-amqp` to install anyway. Everything then works except
-  publishing — the whole test suite passes (the tests swap in an in-memory transport)
-  but `POST /build` answers `503`. The Docker image installs it with
-  [PIE](https://github.com/php/pie); use the dev stack if you need a working `/build`
-  locally.
+- `ext-amqp` to publish. `symfony/amqp-messenger` requires it, so `composer install`
+  refuses to run without it; `--ignore-platform-req=ext-amqp` installs anyway. The tests
+  then pass, as they use an in-memory transport, but `POST /build` answers `503`. The
+  Docker image has it, so use the dev stack for a working `/build`.
 
 ## Local development
 
@@ -125,32 +128,68 @@ curl -s localhost:8080/health
 curl -s -X POST localhost:8080/build \
   -H "Authorization: Bearer $PUBLISH_API_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"static_site_id":"1234-5678","slug":"demo","content_download_url":"https://example.org/a.tar.gz","callback_status_url":"https://example.org/status"}'
+  -d '{"static_site_id":"11f5b798-6f34-4951-ad8b-bfd623ded5c2","slug":"demo","content_download_url":"https://example.org/a.tar.gz","callback_status_url":"https://example.org/status","title":"Demo"}'
 ```
 
-`PUBLISH_API_TOKEN` has to be set for `POST /build` to work at all — see
+`PUBLISH_API_TOKEN` has to be set for `POST /build` to work, see
 [Authentication](#authentication). `/health` does not need it.
 
 ## Docker (dev stack)
 
-PHP's built-in web server plus a RabbitMQ node. The compose file lives in `docker/`, so
-its build context is the repository root.
+The whole system: this API, a RabbitMQ node, two `ssg-worker` instances, and a mock that
+stands in for the Nextcloud Collectives content API. `ssg-worker` is built from a checkout
+at `../ssg-worker`, so clone both repos into the same parent directory first. All services
+run in the time zone `TZ` of your shell, default `Europe/Berlin`.
 
 ```bash
-docker compose -f docker/compose.dev.yaml up --build
+docker compose -f docker/dev/compose.yaml up --build
 curl -s localhost:8080/health
 ```
 
-The management UI is on <http://localhost:15672> (`app` / `secret`) — the place to
-confirm a job actually landed on `q.builds` and to inspect its body and headers. Note
-that this stack only runs the API; to exercise a build end to end with `ssg-worker`
-alongside, use `integration-test/docker-compose.yml` instead of this file (they claim
-the same host ports, so do not run both).
+| Port | What |
+| --- | --- |
+| 8080 | this API |
+| 5672 | RabbitMQ AMQP, for a worker running on the host |
+| 15672 | RabbitMQ management UI (`app` / `secret`) |
+| 8081 | the published sites, served read-only from `docker/dev/published/` |
+| 8082 | the Nextcloud mock: content archives under `/content/`, status callbacks under `/status/` |
 
-The project directory is bind-mounted into the container, so code changes are
-picked up without rebuilding. Install PHP dependencies once on the host (or via
-`docker compose -f docker/compose.dev.yaml exec app composer install`) so
-`vendor/` is populated for the bind mount.
+All ports are bound to `127.0.0.1`. The management UI shows whether a job landed on
+`q.builds`. The collectives-mock log shows what the worker reported back:
+
+```bash
+docker compose -f docker/dev/compose.yaml logs collectives-mock
+```
+
+A build end to end:
+
+```bash
+curl -sS -X POST localhost:8080/build \
+  -H 'Authorization: Bearer dev-api-token-0123456789' \
+  -H 'Content-Type: application/json' \
+  -d '{"static_site_id":"11f5b798-6f34-4951-ad8b-bfd623ded5c2","slug":"demo-site","title":"My Team Handbook",
+       "content_download_url":"http://collectives-mock:8082/content/sample-collective.tar.gz",
+       "callback_status_url":"http://collectives-mock:8082/status/1234"}'
+
+curl -I http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/     # expect 200
+```
+
+The collectives-mock log should then show:
+
+```text
+CALLBACK PUT /status/1234 -> 204 body={"status":"published","data":{"publish_url":"http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/"}}
+```
+
+The project directory is bind-mounted at `/publish`, so code changes are picked up
+without rebuilding. `vendor/` is installed at image build time and kept behind an
+anonymous volume, so the mount does not shadow it. Rebuild with `--build` after changing
+`composer.json`.
+
+The dev image is stage `base` of `docker/Dockerfile`, Alpine with Alpine's PHP 8.5
+packages. Its user `publish` has uid and gid 10001. Compose runs it with your host ids
+instead (`PUBLISH_UID`/`PUBLISH_GID`, default 1000), so it can write `var/` in the
+checkout. Compose starts PHP's built-in server, which handles one request at a time.
+Stage `release` holds the source and has no `CMD`: a deployment sets the server.
 
 ## Tests
 
@@ -158,23 +197,41 @@ picked up without rebuilding. Install PHP dependencies once on the host (or via
 php bin/phpunit
 ```
 
+PHPStan checks `src/` and `tests/` at level 10. It reads the service container from
+`var/cache/dev/`, so warm the cache first:
+
+```bash
+php bin/console cache:warmup && vendor/bin/phpstan analyse
+```
+
+[pre-commit](https://pre-commit.com/) runs the CI lint steps, PHPStan and the tests before each commit.
+It needs PHP 8.5 and `composer install` on the host. Install the hook once:
+
+```bash
+pre-commit install
+```
+
 ## Layout
 
-```
+```text
 config/
   packages/messenger.yaml  builds transport + BuildJob routing
   packages/security.yaml   the firewalls, and the one access_control rule
-public/index.php           Front controller
-config/services.yaml       binds PUBLISH_API_TOKEN into ApiTokenHandler
+  services.yaml            binds PUBLISH_API_TOKEN into ApiTokenHandler
+public/index.php           front controller
 src/
   Controller/              HealthController, BuildController
   Security/ApiTokenHandler.php  compares the token, yields the API identity
   Message/BuildJob.php     the message shape for q.builds
 tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest
 tests/Security/            ApiTokenHandlerTest
-docs/security-bundle.md    why SecurityBundle replaced the hand-written check
+phpstan.dist.neon          PHPStan level and paths
+.pre-commit-config.yaml    the hooks run before each commit
 docker/
-  Dockerfile               php:8.5-cli-alpine + ext-amqp + built-in server
-  compose.dev.yaml         dev stack: api + RabbitMQ
-  rabbitmq-config/         definitions.json (topology) + rabbitmq.conf
+  Dockerfile               alpine + php85 packages; stages base (no source) and release
+  dev/compose.yaml         dev stack: api + RabbitMQ + ssg-worker + mock
+  dev/collectives-mock/    content API stand-in, published-tree server, callback sink
+  dev/published/           bind mount the worker publishes into (gitignored)
+  dev/build_temp/          bind mount for the worker's build scratch (gitignored)
+  dev/rabbitmq-config/     definitions.json (topology) + rabbitmq.conf
 ```

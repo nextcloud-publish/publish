@@ -4,7 +4,7 @@
     "minimum-stability": "stable",
     "prefer-stable": true,
     "require": {
-        "php": ">=8.4.1",
+        "php": ">=8.5",
         "ext-ctype": "*",
         "ext-iconv": "*",
         "ext-xml": "*",
@@ -19,9 +19,13 @@
         "symfony/runtime": "8.1.*",
         "symfony/security-bundle": "8.1.*",
         "symfony/serializer": "8.1.*",
+        "symfony/uid": "8.1.*",
         "symfony/yaml": "8.1.*"
     },
     "require-dev": {
+        "phpstan/phpstan": "^2.3",
+        "phpstan/phpstan-phpunit": "^2.1",
+        "phpstan/phpstan-symfony": "^2.1",
         "phpunit/phpunit": "^13.3",
         "psy/psysh": "^0.12.24",
         "symfony/browser-kit": "8.1.*",

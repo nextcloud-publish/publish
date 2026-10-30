@@ -23,8 +23,8 @@ framework:
 
                 options:
                     # The broker imports its whole topology from
-                    # docker/rabbitmq-config/definitions.json at boot and owns
-                    # it. Left enabled, Messenger would try to declare an
+                    # definitions.json at boot and owns it.
+                    # Left enabled, Messenger would try to declare an
                     # exchange, a queue and a binding on every publish and be
                     # refused -- q.builds already exists as a quorum queue and
                     # its arguments are immutable.
@@ -37,8 +37,8 @@ framework:
                     # 5s matches the wait_for_pending_acks(5.0) this replaces.
                     confirm_timeout: 5
 
-                    # Must match the broker's heartbeat in
-                    # rabbitmq-config/rabbitmq.conf, or a quiet socket looks dead.
+                    # Must match the broker's heartbeat in rabbitmq.conf,
+                    # or a quiet socket looks dead.
                     heartbeat: '%env(int:AMQP_HEARTBEAT)%'
 
                     exchange:

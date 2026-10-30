@@ -1,0 +1,56 @@
+{
+  "rabbit_version": "4.0.0",
+  "comment": "Topology for the publish service; see README.md in this directory.",
+
+  "users": [
+    {
+      "name": "app",
+      "password_hash": "fB5bAiGLAUvRDzV6NFoodcnOx4CaaFxTcbBJ7x/hd12HQuVO",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": ["administrator"]
+    }
+  ],
+
+  "vhosts": [
+    { "name": "/" }
+  ],
+
+  "permissions": [
+    {
+      "user": "app",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+
+  "policies": [],
+  "parameters": [],
+  "global_parameters": [],
+  "topic_permissions": [],
+
+  "exchanges": [
+    {
+      "name": "delays",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+
+  "queues": [
+    {
+      "name": "q.builds",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum" }
+    }
+  ],
+
+  "bindings": []
+}
