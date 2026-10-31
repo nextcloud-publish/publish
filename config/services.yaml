@@ -22,6 +22,14 @@ services:
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
+    # hostname is the container id.
+    Monolog\Processor\HostnameProcessor:
+        tags: [monolog.processor]
+
+    # uid is a random id per request.
+    Monolog\Processor\UidProcessor:
+        tags: [monolog.processor]
+
     App\Security\ApiTokenHandler:
         arguments:
             # Shared secret every protected endpoint checks. No default here or

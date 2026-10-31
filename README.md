@@ -108,6 +108,24 @@ Messenger also adds `type` and `X-Message-Stamp-*` AMQP headers alongside the bo
 `ssg-worker` consumes `q.builds` through Symfony Messenger too, decoding the JSON body
 and its `type` header back into its own `App\Message\BuildJob`.
 
+## Logging
+
+[Monolog](https://symfony.com/doc/current/logging.html) writes every line to
+`var/log/publish.log` and to stderr. The file is not rotated; mount `var/log/` from the
+host and rotate it there.
+
+| Variable    | Required | Default                | Description                                                          |
+| ----------- | -------- | ---------------------- | -------------------------------------------------------------------- |
+| `LOG_LEVEL` | no       | `info`, `debug` in dev | Lowest level written: `debug`, `info`, `notice`, `warning`, `error` |
+
+```text
+[2026-10-31T14:03:12.481920+00:00] request.ERROR: Uncaught PHP Exception … {"exception":"…"} {"hostname":"3f9a1c2b7d4e","uid":"a1b2c3d"}
+```
+
+`hostname` is the container id and `uid` a random id per request. In prod the `request`,
+`security` and `messenger` channels write from `warning` up, so health checks leave no line.
+Timestamps follow `TZ`.
+
 ## Requirements
 
 - PHP >= 8.5 and [Composer](https://getcomposer.org/) for local runs. `ext-ctype`,
@@ -182,8 +200,8 @@ CALLBACK PUT /status/1234 -> 204 body={"status":"published","data":{"publish_url
 
 The project directory is bind-mounted at `/publish`, so code changes are picked up
 without rebuilding. `vendor/` is installed at image build time and kept behind an
-anonymous volume, so the mount does not shadow it. Rebuild with `--build` after changing
-`composer.json`.
+anonymous volume, so the mount does not shadow it. After changing `composer.json`, rebuild
+with `--build --renew-anon-volumes`; without the second flag compose keeps the old `vendor/`.
 
 The dev image is stage `base` of `docker/Dockerfile`, Alpine with Alpine's PHP 8.5
 packages. Its user `publish` has uid and gid 10001. Compose runs it with your host ids

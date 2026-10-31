@@ -26,7 +26,7 @@ COPY --from=composer/composer:2-bin /composer /usr/bin/composer
 COPY composer.json composer.lock* ./
 RUN composer install --no-interaction --no-progress --no-scripts
 
-# var/ holds the Symfony cache, the only directory in the image the app writes.
+# var/ holds the Symfony cache and var/log/, the only directory in the image the app writes.
 RUN mkdir var && chown publish:publish var
 
 USER publish

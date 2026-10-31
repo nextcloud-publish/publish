@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Logging with Monolog to `var/log/publish.log` and stderr, in line format, from `LOG_LEVEL` up
+  (`info`, `debug` in dev). Every line carries the container's `hostname` and a `uid` per request.
+  The `request`, `security` and `messenger` channels write from `warning` up in prod.
+
 ## [0.2.0] - 2026-10-30
 
 ### Changed
@@ -31,5 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GHCR.
 - Pre-commit hooks that run the CI lint and test steps.
 
+[Unreleased]: https://github.com/nextcloud-publish/publish/compare/0.2.0...HEAD
 [0.2.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.2.0
 [0.1.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.1.0
