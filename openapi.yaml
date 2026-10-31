@@ -1,0 +1,250 @@
+openapi: 3.1.0
+
+info:
+  title: publish API
+  version: main
+  summary: Takes build requests for static sites and queues them for ssg-worker.
+  description: |
+    `POST /build` checks a build request and queues it. ssg-worker renders the site and reports
+    the outcome with a `PUT` to the request's `callback_status_url`, described under the
+    `buildStatus` callback of `POST /build`.
+  license:
+    name: AGPL-3.0-or-later
+    identifier: AGPL-3.0-or-later
+
+servers:
+  - url: https://publish.example.org
+    description: A deployment; every operator runs their own.
+
+tags:
+  - name: Builds
+    description: Build requests and the status callback.
+  - name: Health
+    description: For healthchecks and monitoring.
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Health check
+      description: Public, for container healthchecks and monitoring. An `Authorization` header is ignored.
+      security: []
+      responses:
+        '200':
+          description: The app is up. It does not check the broker.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    enum: ['ok']
+
+  /build:
+    post:
+      tags: [Builds]
+      operationId: createBuild
+      summary: Queue a build
+      description: |
+        Answers `202` only after the broker confirms the message.
+        Fields other than the five below are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildRequest'
+      responses:
+        '202':
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    enum: ['enqueued']
+        '400':
+          description: |
+            A field is missing or invalid (`Invalid`), or the body is not JSON. The latter is
+            Symfony's error: `Problem` when the request accepts JSON, an HTML page otherwise.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Invalid'
+                  - $ref: '#/components/schemas/Problem'
+            text/html: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          description: The broker could not be reached or did not confirm the message. Nothing was queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, error]
+                properties:
+                  status:
+                    enum: ['error']
+                  error:
+                    enum: ['could not enqueue build']
+      callbacks:
+        buildStatus:
+          '{$request.body#/callback_status_url}':
+            put:
+              summary: Report the outcome of a build
+              description: |
+                ssg-worker sends this once a build is published, or once it failed for good.
+                Delivery is at-least-once: dedupe on `(callback_status_url, status)` and treat a
+                status as final.
+              security: []
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      oneOf:
+                        - $ref: '#/components/schemas/BuildPublished'
+                        - $ref: '#/components/schemas/BuildFailed'
+              responses:
+                '2XX':
+                  description: Accepted.
+                '3XX':
+                  description: Not followed. The build is reported `failed` and not retried.
+                '4XX':
+                  description: |
+                    `408` and `429` are retried, so the whole build runs again. Any other `4XX`
+                    fails the build for good.
+                '5XX':
+                  description: Retried, so the whole build runs again.
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: |
+        The deployment's `PUBLISH_API_TOKEN`. The scheme is case-sensitive (`Bearer`), and the
+        token may use `A-Z a-z 0-9 - _ + ~ / .` with optional trailing `=`.
+
+  responses:
+    Unauthorized:
+      description: |
+        No token, or a token that does not match. Rely on the status code: without a token the
+        body is Symfony's error, `Problem` when the request accepts JSON and an HTML page
+        otherwise; a wrong token gets an empty body and a `WWW-Authenticate` header.
+      headers:
+        WWW-Authenticate:
+          description: Only for a token that parsed but did not match.
+          schema:
+            type: string
+            examples:
+              - Bearer error="invalid_token",error_description="Invalid credentials."
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+        text/html: {}
+
+  schemas:
+    SafeId:
+      type: string
+      pattern: '^[A-Za-z0-9_-]{1,128}$'
+
+    HttpUrl:
+      type: string
+      format: uri
+      pattern: '^[Hh][Tt][Tt][Pp][Ss]?://[^/?#]+'
+      description: An `http` or `https` URL with a host.
+
+    BuildRequest:
+      type: object
+      required: [static_site_id, slug, title, content_download_url, callback_status_url]
+      properties:
+        static_site_id:
+          allOf: [$ref: '#/components/schemas/SafeId']
+          description: The site's directory under the published root.
+          examples: ['1234-5678']
+        slug:
+          allOf: [$ref: '#/components/schemas/SafeId']
+          description: The directory the site is published under, inside `static_site_id`.
+          examples: [some_collective]
+        title:
+          type: string
+          pattern: '\S'
+          maxLength: 200
+          description: The heading on every page. Trimmed; 1 to 200 characters after trimming.
+          examples: [Some Collective]
+        content_download_url:
+          allOf: [$ref: '#/components/schemas/HttpUrl']
+          description: The Collectives export (`.tar.gz`) ssg-worker downloads.
+          examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/content.tar.gz']
+        callback_status_url:
+          allOf: [$ref: '#/components/schemas/HttpUrl']
+          description: Where ssg-worker `PUT`s the outcome; see the `buildStatus` callback.
+          examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/status']
+
+    Invalid:
+      type: object
+      required: [status, error]
+      properties:
+        status:
+          enum: ['invalid']
+        error:
+          type: string
+          description: Which check failed.
+          examples: ['slug must match [A-Za-z0-9_-]{1,128}']
+
+    Problem:
+      type: object
+      description: Symfony's error, in the shape of RFC 9457.
+      required: [title, status]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+
+    BuildPublished:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          enum: ['published']
+        data:
+          type: object
+          required: [publish_url]
+          properties:
+            publish_url:
+              type: string
+              format: uri
+              examples: ['https://sites.example.org/1234-5678/some_collective/']
+
+    BuildFailed:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          enum: ['failed']
+        data:
+          type: object
+          required: [error_message]
+          properties:
+            error_message:
+              type: string
+              maxLength: 515
+              description: |
+                Why the build failed. Paths are shortened, URL credentials removed, and the text
+                cut at 500 characters plus ` ...(truncated)`.
+              examples: ['Invalid Collectives export: no Markdown page found']
+
+security:
+  - bearer: []
