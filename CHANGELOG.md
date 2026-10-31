@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Logging with Monolog to `var/log/publish.log` and stderr, in line format, from `LOG_LEVEL` up
   (`info`, `debug` in dev). Every line carries the container's `hostname` and a `uid` per request.
   The `request`, `security` and `messenger` channels write from `warning` up in prod.
+- `POST /build` logs `Build enqueued` with the `build_id`, `Build request rejected` with the
+  reason, and `Could not enqueue build` with the exception behind a `503`. A wrong bearer token
+  logs `Rejected API token` with the client address.
 
 ## [0.2.0] - 2026-10-30
 

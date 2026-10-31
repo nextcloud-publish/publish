@@ -119,8 +119,18 @@ host and rotate it there.
 | `LOG_LEVEL` | no       | `info`, `debug` in dev | Lowest level written: `debug`, `info`, `notice`, `warning`, `error` |
 
 ```text
-[2026-10-31T14:03:12.481920+00:00] request.ERROR: Uncaught PHP Exception … {"exception":"…"} {"hostname":"3f9a1c2b7d4e","uid":"a1b2c3d"}
+[2026-10-31T14:03:12.481920+00:00] app.INFO: Build enqueued {"build_id":"0199c3e2-…","static_site_id":"site-42","slug":"handbook"} {"hostname":"3f9a1c2b7d4e","uid":"a1b2c3d"}
 ```
+
+| Level    | Message                   | Context                                                | Answer |
+| -------- | ------------------------- | ------------------------------------------------------ | ------ |
+| `info`   | `Build enqueued`          | `build_id`, `static_site_id`, `slug`                   | `202`  |
+| `notice` | `Build request rejected`  | `reason`                                               | `400`  |
+| `notice` | `Rejected API token`      | `ip`                                                   | `401`  |
+| `error`  | `Could not enqueue build` | `build_id`, `static_site_id`, `slug`, `exception`      | `503`  |
+
+`build_id` is the id ssg-worker logs for the same build. The request body, URLs included, is
+not logged; the ids identify the build. A request without a bearer token is not logged.
 
 `hostname` is the container id and `uid` a random id per request. In prod the `request`,
 `security` and `messenger` channels write from `warning` up, so health checks leave no line.
