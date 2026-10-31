@@ -130,7 +130,8 @@ jobs:
     name: Publish API docs
     runs-on: ubuntu-latest
     needs: [lint, test]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # TEMP: also deploys from this branch to test Pages; drop before the merge.
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.head_ref == '42-further-extend-basic-structure'
     permissions:
       pages: write
       id-token: write
