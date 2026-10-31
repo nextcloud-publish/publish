@@ -73,3 +73,27 @@ when@prod:
                 type: stream
                 path: php://stderr
                 include_stacktraces: true
+            # Error lines with an exception become Sentry events.
+            sentry:
+                type: filter
+                min_level: error
+                handler: sentry_events
+                channels: ['!event', '!deprecation', '!request', '!security', '!messenger']
+            # Symfony logs a 4xx at error and a 5xx at critical.
+            sentry_request:
+                type: filter
+                min_level: critical
+                handler: sentry_events
+                channels: [request]
+            # The lines before an event become its breadcrumbs, whatever LOG_LEVEL is.
+            sentry_breadcrumbs:
+                type: filter
+                max_level: warning
+                handler: breadcrumbs
+                channels: ['!event', '!deprecation', '!request', '!security', '!messenger']
+            sentry_events:
+                type: service
+                id: Sentry\Monolog\ExceptionToSentryIssueHandler
+            breadcrumbs:
+                type: service
+                id: Sentry\Monolog\BreadcrumbHandler

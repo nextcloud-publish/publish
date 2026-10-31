@@ -114,9 +114,10 @@ and its `type` header back into its own `App\Message\BuildJob`.
 `var/log/publish.log` and to stderr. The file is not rotated; mount `var/log/` from the
 host and rotate it there.
 
-| Variable    | Required | Default                | Description                                                          |
-| ----------- | -------- | ---------------------- | -------------------------------------------------------------------- |
-| `LOG_LEVEL` | no       | `info`, `debug` in dev | Lowest level written: `debug`, `info`, `notice`, `warning`, `error` |
+| Variable     | Required | Default                | Description                                                          |
+| ------------ | -------- | ---------------------- | -------------------------------------------------------------------- |
+| `LOG_LEVEL`  | no       | `info`, `debug` in dev | Lowest level written: `debug`, `info`, `notice`, `warning`, `error` |
+| `SENTRY_DSN` | no       | none                   | Sentry or GlitchTip DSN; prod only, unset sends nothing              |
 
 ```text
 [2026-10-31T14:03:12.481920+00:00] app.INFO: Build enqueued {"build_id":"0199c3e2-…","static_site_id":"site-42","slug":"handbook"} {"hostname":"3f9a1c2b7d4e","uid":"a1b2c3d"}
@@ -135,6 +136,11 @@ not logged; the ids identify the build. A request without a bearer token is not 
 `hostname` is the container id and `uid` a random id per request. In prod the `request`,
 `security` and `messenger` channels write from `warning` up, so health checks leave no line.
 Timestamps follow `TZ`.
+
+In prod, with `SENTRY_DSN` set, every `error` line with an `exception` and every uncaught
+exception (500) is also sent to Sentry, with the lines before it in the request as breadcrumbs,
+`debug` included. A 4xx is not sent. The event carries the request, URLs and ids included, but
+not the bearer token.
 
 ## Requirements
 

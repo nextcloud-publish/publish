@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /build` logs `Build enqueued` with the `build_id`, `Build request rejected` with the
   reason, and `Could not enqueue build` with the exception behind a `503`. A wrong bearer token
   logs `Rejected API token` with the client address.
+- Sentry through Monolog, in prod with `SENTRY_DSN`: `error` lines with an exception and
+  uncaught exceptions (500) become events, the request's earlier lines their breadcrumbs. A 4xx is
+  not sent.
 
 ## [0.2.0] - 2026-10-30
 
