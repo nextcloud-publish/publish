@@ -5,6 +5,10 @@ RabbitMQ for `ssg-worker` to pick up.
 
 ## Endpoints
 
+[`openapi.yaml`](openapi.yaml) specifies both endpoints and the status callback ssg-worker
+sends. It is published with Redoc at <https://nextcloud-publish.github.io/publish/> on every
+push to `main`.
+
 | Method | Path      | Response                                                            |
 | ------ | --------- | ------------------------------------------------------------------- |
 | GET    | `/health` | `{"status":"ok"}` -- public, no token                               |
@@ -261,6 +265,18 @@ It needs PHP 8.5 and `composer install` on the host. Install the hook once:
 pre-commit install
 ```
 
+`tests/OpenApiTest.php` checks every answer the app gives against `openapi.yaml`, and that the
+spec rejects the payloads the app rejects. CI also lints the spec with Redocly. To lint it and
+render the page locally (needs Node.js):
+
+```bash
+npx @redocly/cli lint openapi.yaml
+```
+
+```bash
+npx @redocly/cli build-docs openapi.yaml -o var/api-docs/index.html
+```
+
 ## Layout
 
 ```text
@@ -275,6 +291,9 @@ src/
   Message/BuildJob.php     the message shape for q.builds
 tests/Controller/          HealthControllerTest, BuildControllerTest, BuildEnqueueTest
 tests/Security/            ApiTokenHandlerTest
+tests/OpenApiTest.php      checks the app's answers against openapi.yaml
+openapi.yaml               the API spec, OpenAPI 3.1
+redocly.yaml               Redocly lint rules for the spec
 phpstan.dist.neon          PHPStan level and paths
 .pre-commit-config.yaml    the hooks run before each commit
 docker/

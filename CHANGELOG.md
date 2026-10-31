@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sentry through Monolog, in prod with `SENTRY_DSN`: `error` lines with an exception and
   uncaught exceptions (500) become events, the request's earlier lines their breadcrumbs. A 4xx is
   not sent.
+- `openapi.yaml`, an OpenAPI 3.1 spec of `GET /health`, `POST /build` and the status callback,
+  published with Redoc to GitHub Pages from `main`. A test checks the app's answers against it,
+  and CI lints it.
 
 ## [0.2.0] - 2026-10-30
 

@@ -1,0 +1,6 @@
+extends:
+  - recommended
+
+rules:
+  # /health has no error answer.
+  operation-4xx-response: off
