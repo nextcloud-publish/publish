@@ -6,6 +6,9 @@ namespace App\Tests\Controller;
 
 use App\Controller\BuildController;
 use App\Message\BuildJob;
+use Monolog\Handler\TestHandler;
+use Monolog\Level;
+use Monolog\Logger;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -31,6 +34,14 @@ final class BuildEnqueueTest extends TestCase
         'title' => 'Some Collective',
     ];
 
+    /** Records what the controller under test logs. */
+    private TestHandler $logged;
+
+    protected function setUp(): void
+    {
+        $this->logged = new TestHandler();
+    }
+
     /**
      * Builds a POST /build request with $payload as its JSON body.
      *
@@ -51,11 +62,11 @@ final class BuildEnqueueTest extends TestCase
      * Builds the controller under test.
      *
      * @param MessageBusInterface $bus The bus the controller dispatches to.
-     * @return BuildController the controller
+     * @return BuildController the controller, logging into $this->logged
      */
-    private static function controller(MessageBusInterface $bus): BuildController
+    private function controller(MessageBusInterface $bus): BuildController
     {
-        return new BuildController($bus);
+        return new BuildController($bus, new Logger('app', [$this->logged]));
     }
 
     public function testDispatchesBuildJobAndReturns202(): void
@@ -82,7 +93,7 @@ final class BuildEnqueueTest extends TestCase
             // The real bus returns the Envelope it dispatched, so the double does too.
             ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
 
-        $controller = self::controller($bus);
+        $controller = $this->controller($bus);
         $response = $controller(self::request(self::PAYLOAD));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
@@ -90,6 +101,7 @@ final class BuildEnqueueTest extends TestCase
             '{"status":"enqueued"}',
             (string) $response->getContent(),
         );
+        self::assertTrue($this->logged->hasInfoThatContains('Build enqueued'));
     }
 
     public function testReturns503WhenDispatchFails(): void
@@ -99,7 +111,7 @@ final class BuildEnqueueTest extends TestCase
         $bus->method('dispatch')
             ->willThrowException(new TransportException('connection refused'));
 
-        $controller = self::controller($bus);
+        $controller = $this->controller($bus);
         $response = $controller(self::request(self::PAYLOAD));
 
         self::assertSame(Response::HTTP_SERVICE_UNAVAILABLE, $response->getStatusCode());
@@ -107,6 +119,14 @@ final class BuildEnqueueTest extends TestCase
             '{"status":"error","error":"could not enqueue build"}',
             (string) $response->getContent(),
         );
+
+        // The 503 body names no cause; only the log does.
+        $records = $this->logged->getRecords();
+        self::assertCount(1, $records);
+        self::assertSame(Level::Error, $records[0]->level);
+        self::assertSame('Could not enqueue build', $records[0]->message);
+        self::assertSame(self::PAYLOAD['slug'], $records[0]->context['slug']);
+        self::assertInstanceOf(TransportException::class, $records[0]->context['exception']);
     }
 
     public function testRejectsIncompletePayloadWithoutDispatching(): void
@@ -117,7 +137,7 @@ final class BuildEnqueueTest extends TestCase
         $payload = self::PAYLOAD;
         unset($payload['slug']);
 
-        $controller = self::controller($bus);
+        $controller = $this->controller($bus);
         $response = $controller(self::request($payload));
 
         self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
@@ -125,5 +145,6 @@ final class BuildEnqueueTest extends TestCase
             '{"status":"invalid","error":"missing required fields"}',
             (string) $response->getContent(),
         );
+        self::assertTrue($this->logged->hasNoticeThatContains('Build request rejected'));
     }
 }

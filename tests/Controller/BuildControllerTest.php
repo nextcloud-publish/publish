@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Controller;
 
 use App\Message\BuildJob;
+use Monolog\Handler\TestHandler;
+use Monolog\Level;
+use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Messenger\Envelope;
@@ -45,6 +48,29 @@ final class BuildControllerTest extends WebTestCase
         return $transport->getSent();
     }
 
+    /**
+     * Returns every record logged during the request, which when@test keeps in memory.
+     *
+     * @return LogRecord[]
+     */
+    private static function logged(): array
+    {
+        $handler = static::getContainer()->get('monolog.handler.test');
+        self::assertInstanceOf(TestHandler::class, $handler);
+
+        return $handler->getRecords();
+    }
+
+    /**
+     * Returns the records our code logged to the app channel.
+     *
+     * @return LogRecord[]
+     */
+    private static function appLogged(): array
+    {
+        return array_values(array_filter(self::logged(), static fn (LogRecord $record): bool => $record->channel === 'app'));
+    }
+
     public function testBuildEnqueuedOnCompletePayload(): void
     {
         $client = static::createClient();
@@ -75,6 +101,43 @@ final class BuildControllerTest extends WebTestCase
         self::assertSame('some_collective', $build->slug);
 
         self::assertSame('Some Collective', $build->title);
+
+        $logged = self::appLogged();
+        self::assertCount(1, $logged);
+        self::assertSame(Level::Info, $logged[0]->level);
+        self::assertSame('Build enqueued', $logged[0]->message);
+        self::assertSame(
+            ['build_id' => $build->build_id, 'static_site_id' => '1234-5678', 'slug' => 'some_collective'],
+            $logged[0]->context,
+        );
+    }
+
+    public function testNoLogRecordCarriesARequestUrl(): void
+    {
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', self::PAYLOAD, self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+
+        // Every channel logs at debug in tests, so framework lines are covered too.
+        foreach (self::logged() as $record) {
+            $line = (string) json_encode($record->toArray(), JSON_UNESCAPED_SLASHES);
+            self::assertStringNotContainsString('/collectives/publish/', $line);
+        }
+    }
+
+    public function testARejectedRequestLogsTheReason(): void
+    {
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', ['slug' => '../etc'] + self::PAYLOAD, self::AUTH);
+
+        self::assertResponseStatusCodeSame(400);
+
+        $logged = self::appLogged();
+        self::assertCount(1, $logged);
+        self::assertSame(Level::Notice, $logged[0]->level);
+        self::assertSame('Build request rejected', $logged[0]->message);
+        self::assertSame(['reason' => 'slug must match [A-Za-z0-9_-]{1,128}'], $logged[0]->context);
     }
 
     /** The slug allow-list excludes spaces, so a readable heading has to travel as its own field. */
@@ -309,6 +372,33 @@ final class BuildControllerTest extends WebTestCase
         self::assertSame($challenge, $client->getResponse()->headers->get('WWW-Authenticate'));
 
         self::assertCount(0, self::sentToBuilds());
+    }
+
+    public function testAWrongTokenIsLoggedWithTheClientAddress(): void
+    {
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', self::PAYLOAD, [
+            'HTTP_AUTHORIZATION' => 'Bearer ' . str_repeat('x', strlen(self::TOKEN)),
+            'REMOTE_ADDR' => '203.0.113.7',
+        ]);
+
+        self::assertResponseStatusCodeSame(401);
+
+        $logged = self::appLogged();
+        self::assertCount(1, $logged);
+        self::assertSame(Level::Notice, $logged[0]->level);
+        self::assertSame('Rejected API token', $logged[0]->message);
+        self::assertSame(['ip' => '203.0.113.7'], $logged[0]->context);
+    }
+
+    public function testARequestWithoutATokenIsNotLogged(): void
+    {
+        // No token reaches an authenticator, so there is no failure to log.
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', self::PAYLOAD);
+
+        self::assertResponseStatusCodeSame(401);
+        self::assertSame([], self::appLogged());
     }
 
     public function testMalformedJsonWithoutATokenIsRejectedBeforeItIsParsed(): void

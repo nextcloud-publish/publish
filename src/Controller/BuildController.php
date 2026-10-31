@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Message\BuildJob;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\Exception\JsonException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -18,11 +19,13 @@ use Symfony\Component\Uid\Uuid;
  * The security firewall authenticates the request before this controller is resolved.
  *
  * @param MessageBusInterface $bus The bus that publishes the BuildJob to the `builds` transport.
+ * @param LoggerInterface $logger The app logger.
  */
 final class BuildController
 {
     public function __construct(
         private readonly MessageBusInterface $bus,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -137,6 +140,7 @@ final class BuildController
         try {
             $fields = $this->validatePayload($payload);
         } catch (\InvalidArgumentException $e) {
+            $this->logger->notice('Build request rejected', ['reason' => $e->getMessage()]);
             return new JsonResponse(['status' => 'invalid', 'error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
         }
 
@@ -150,18 +154,27 @@ final class BuildController
             created_at: (new \DateTimeImmutable('now'))->format(\DateTimeInterface::ATOM),
         );
 
+        // The ids identify the build; the URLs would repeat them.
+        $logContext = [
+            'build_id' => $build->build_id,
+            'static_site_id' => $build->static_site_id,
+            'slug' => $build->slug,
+        ];
+
         try {
             // Blocks until the broker confirms the publish (confirm_timeout in config/packages/messenger.yaml).
             $this->bus->dispatch($build);
         } catch (\Throwable $e) {
             // Broader than Messenger's TransportException on purpose: an unset AMQP_DSN or a
             // serialization failure must not produce a 202 either.
+            $this->logger->error('Could not enqueue build', $logContext + ['exception' => $e]);
             return new JsonResponse(
                 ['status' => 'error', 'error' => 'could not enqueue build'],
                 Response::HTTP_SERVICE_UNAVAILABLE,
             );
         }
 
+        $this->logger->info('Build enqueued', $logContext);
         return new JsonResponse(['status' => 'enqueued'], Response::HTTP_ACCEPTED);
     }
 }
