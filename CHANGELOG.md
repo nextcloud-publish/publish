@@ -21,6 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `openapi.yaml`, an OpenAPI 3.1 spec of `GET /health`, `POST /build` and the status callback,
   published with Redoc to GitHub Pages from `main`. A test checks the app's answers against it,
   and CI lints it.
+- `docker/compose.yaml`, a production sample of nginx, the API, RabbitMQ and ssg-worker. It keeps
+  the published sites in `pages/`, the logs in `logs/` and the build scratch in the `build-temp`
+  volume, and uses the `:latest` images. RabbitMQ reads its user from
+  `docker/rabbitmq/definitions.json`, which the admin creates from `definitions.example.json` with
+  a hash of `RABBITMQ_PASSWORD`.
+- The wiki page Deploy publish, which sets up the production sample.
+
+### Changed
+
+- The dev stack serves the API with PHP-FPM behind nginx instead of PHP's built-in server, from
+  `docker/dev/Dockerfile`.
+- The image in GHCR runs PHP-FPM on port 9000, without dev dependencies, with `APP_ENV=prod` built
+  in, the cache warmed and OPcache not checking files for changes.
+- Responses carry no `X-Powered-By` header with the PHP version.
+- The RabbitMQ user in dev is `publish` instead of `app`, password `secret`. The dev broker config
+  is in `docker/dev/rabbitmq/`.
 
 ## [0.2.0] - 2026-10-30
 

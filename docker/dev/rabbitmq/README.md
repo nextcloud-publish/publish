@@ -39,7 +39,7 @@ Its type and flags must match what `getDelayExchange()` would declare: `direct` 
 
 ## Delay queues
 
-Messenger declares its delay queues at runtime, which the `app` user's `configure` permission allows.
+Messenger declares its delay queues at runtime, which the `publish` user's `configure` permission allows.
 They cannot be listed in `definitions.json`, because the delay is part of the name:
 
 - name `delay__q.builds_<ms>_retry` (double underscore, because the transport's exchange name is empty)
@@ -49,11 +49,11 @@ They cannot be listed in `definitions.json`, because the delay is part of the na
 Do not set `default_queue_type=quorum` on the vhost.
 The delay queues would become quorum queues, and a quorum queue cannot be redeclared to renew its `x-expires`.
 
-## The app user
+## The publish user
 
-`definitions.json` defines the `app` user, so `RABBITMQ_DEFAULT_USER`/`RABBITMQ_DEFAULT_PASS` are ignored.
+`definitions.json` defines the `publish` user, so `RABBITMQ_DEFAULT_USER`/`RABBITMQ_DEFAULT_PASS` are ignored.
 Its `password_hash` is a salted SHA-256 of `secret`. Generate a new one with:
 
 ```sh
-php -r '$s=random_bytes(4);echo base64_encode($s.hash("sha256",$s."<pw>",true));'
+docker run --rm rabbitmq:4 rabbitmqctl -q hash_password <pw>
 ```
