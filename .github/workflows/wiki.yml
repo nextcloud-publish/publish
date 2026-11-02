@@ -2,8 +2,9 @@ name: Wiki
 
 on:
   push:
-    branches: [main]
-    paths: ['docs/wiki/**']
+    # TEMP: also pushes from this branch to test the sync; drop before the merge.
+    branches: [main, 42-further-extend-basic-structure]
+    paths: ['docs/wiki/**', '.github/workflows/wiki.yml']
   workflow_dispatch:
 
 concurrency:
