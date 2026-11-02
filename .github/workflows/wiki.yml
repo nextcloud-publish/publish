@@ -1,0 +1,39 @@
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/wiki/**', '.github/workflows/wiki.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: wiki
+
+permissions:
+  contents: write
+
+jobs:
+  wiki:
+    name: Push docs/wiki to the wiki
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Clone the wiki
+        run: git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The wiki gets exactly docs/wiki/: a page deleted there is deleted in the wiki.
+      - name: Copy the pages
+        run: rsync -a --delete --exclude .git docs/wiki/ wiki/
+
+      - name: Push
+        working-directory: wiki
+        run: |
+          git add -A
+          git diff --cached --quiet && exit 0
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m "Update from ${GITHUB_REPOSITORY}@${GITHUB_SHA::7}"
+          git push

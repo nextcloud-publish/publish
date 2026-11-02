@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "The dev stack's fixed API token, set in docker/dev/compose.yaml"
+regexes = ['''^dev-api-token-0123456789$''']
