@@ -89,7 +89,7 @@ the broker instead of handling the message locally.
 
 The transport publishes to the default exchange with `q.builds` as the routing key, and
 declares no topology: the broker imports the queue, user and permissions from
-`docker/dev/rabbitmq-config/definitions.json` at boot and owns them, which is why
+`docker/dev/rabbitmq/definitions.json` at boot and owns them, which is why
 `auto_setup` is off.
 
 Messages are serialized as JSON by Messenger's built-in `symfony_serializer` (not the
@@ -188,7 +188,7 @@ curl -s localhost:8080/health
 | --- | --- |
 | 8080 | this API |
 | 5672 | RabbitMQ AMQP, for a worker running on the host |
-| 15672 | RabbitMQ management UI (`app` / `secret`) |
+| 15672 | RabbitMQ management UI (`publish` / `secret`) |
 | 8081 | the published sites, served read-only from `docker/dev/published/` |
 | 8082 | the Nextcloud mock: content archives under `/content/`, status callbacks under `/status/` |
 
@@ -223,15 +223,19 @@ without rebuilding. `vendor/` is installed at image build time and kept behind a
 anonymous volume, so the mount does not shadow it. After changing `composer.json`, rebuild
 with `--build --renew-anon-volumes`; without the second flag compose keeps the old `vendor/`.
 
-The dev image is stage `base` of `docker/Dockerfile`, Alpine with Alpine's PHP 8.5
-packages. Its user `publish` has uid and gid 10001. Compose runs it with your host ids
-instead (`PUBLISH_UID`/`PUBLISH_GID`, default 1000), so it can write `var/` in the
-checkout. Compose starts PHP's built-in server, which handles one request at a time.
-Stage `release` holds the source and has no `CMD`: a deployment sets the server.
+The API runs as in production: `web` is nginx on port 8080 and passes every request to
+PHP-FPM in `publish`. `publish` is built from `docker/dev/Dockerfile`, Alpine with Alpine's
+PHP 8.5 packages, the dev dependencies and composer, without the source. It shares
+`nginx/default.conf` and `php/` with the production image; only OPcache checks files
+for changes. Its user `publish` has uid and gid 10001. Compose runs it with your host ids instead
+(`PUBLISH_UID`/`PUBLISH_GID`, default 1000), so it can write `var/` in the checkout. CI
+does not build this image.
 
 ## Images
 
-CI pushes the image to `ghcr.io/nextcloud-publish/publish`, built from stage `release`:
+CI pushes the image to `ghcr.io/nextcloud-publish/publish`, built from `docker/Dockerfile`.
+[Deploy publish](https://github.com/nextcloud-publish/publish/wiki/Deploy-publish) runs it with
+compose behind a TLS proxy on the host.
 
 | Tag | Points to |
 | --- | --- |
@@ -297,10 +301,17 @@ redocly.yaml               Redocly lint rules for the spec
 phpstan.dist.neon          PHPStan level and paths
 .pre-commit-config.yaml    the hooks run before each commit
 docker/
-  Dockerfile               alpine + php85 packages; stages base (no source) and release
-  dev/compose.yaml         dev stack: api + RabbitMQ + ssg-worker + mock
+  Dockerfile               the image CI pushes: PHP-FPM with the app, no dev dependencies
+  compose.yaml             production sample: nginx + api + RabbitMQ + ssg-worker
+  .env.example             the sample's settings
+  nginx/default.conf       passes every request to PHP-FPM; prod and dev
+  php/php-fpm.conf         replaces the image's FPM config; prod and dev
+  php/php.ini              time zone and OPcache; prod and dev
+  rabbitmq/                production broker config and definitions
+  dev/Dockerfile           alpine + php85-fpm + dev dependencies, no source
+  dev/compose.yaml         dev stack: nginx + api + RabbitMQ + ssg-worker + mock
   dev/collectives-mock/    content API stand-in, published-tree server, callback sink
   dev/published/           bind mount the worker publishes into (gitignored)
   dev/build_temp/          bind mount for the worker's build scratch (gitignored)
-  dev/rabbitmq-config/     definitions.json (topology) + rabbitmq.conf
+  dev/rabbitmq/            definitions.json (topology) + rabbitmq.conf
 ```

@@ -3,6 +3,7 @@
 .github
 .dockerignore
 docker
+!docker/php
 var
 vendor
 .phpunit.cache

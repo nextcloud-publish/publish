@@ -8,29 +8,32 @@ name: publish-dev
 #
 #   docker compose -f docker/dev/compose.yaml up --build
 
-# Time zone for all services; a TZ in your shell overrides it.
-x-tz: &tz
-  TZ: "${TZ:-Europe/Berlin}"
-
 services:
-  ssg-api:
-    build:
-      context: ../..
-      dockerfile: docker/Dockerfile
-      target: base
-      pull: true
-    image: ssg-api-dev
-    user: "${PUBLISH_UID:-1000}:${PUBLISH_GID:-1000}"
-    command: ["php", "-S", "0.0.0.0:8080", "-t", "public", "public/index.php"]
+  web:
+    image: nginxinc/nginx-unprivileged:1.30-alpine
     environment:
-      <<: *tz
-      APP_ENV: dev
-      APP_DEBUG: "1"
-      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
-      AMQP_HEARTBEAT: "10"
-      PUBLISH_API_TOKEN: "dev-api-token-0123456789"
+      TZ: "${TZ:-Europe/Berlin}"
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - ../nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - publish
+
+  publish:
+    build:
+      context: ../..
+      dockerfile: docker/dev/Dockerfile
+      pull: true
+    image: publish-dev
+    user: "${PUBLISH_UID:-1000}:${PUBLISH_GID:-1000}"
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      AMQP_DSN: "amqp://publish:secret@rabbitmq:5672/%2f"
+      AMQP_HEARTBEAT: "10"
+      PUBLISH_API_TOKEN: "dev-api-token-0123456789"
     volumes:
       - ../..:/publish
       - /publish/vendor
@@ -42,11 +45,11 @@ services:
     image: rabbitmq:4-management
     hostname: rabbitmq
     environment:
-      <<: *tz
+      TZ: "${TZ:-Europe/Berlin}"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
-      - ./rabbitmq-config/rabbitmq.conf:/etc/rabbitmq/conf.d/20-custom.conf:ro
-      - ./rabbitmq-config/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-custom.conf:ro
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     ports:
       - "127.0.0.1:5672:5672"     # AMQP
       - "127.0.0.1:15672:15672"   # management UI
@@ -60,23 +63,19 @@ services:
   ssg-worker:
     build:
       context: ../../../ssg-worker
-      dockerfile: docker/Dockerfile
-      # The source comes from the mount below, not from the image.
-      target: base
+      dockerfile: docker/dev/Dockerfile
       pull: true
     image: ssg-worker-dev
     deploy:
       replicas: 2
     user: "${SSG_WORKER_UID:-1000}:${SSG_WORKER_GID:-1000}"
     environment:
-      <<: *tz
+      TZ: "${TZ:-Europe/Berlin}"
       APP_ENV: dev
       APP_DEBUG: "1"
-      AMQP_DSN: "amqp://app:secret@rabbitmq:5672/%2f"
-      # Must match `heartbeat` in ./rabbitmq-config/rabbitmq.conf.
+      AMQP_DSN: "amqp://publish:secret@rabbitmq:5672/%2f"
+      # Must match `heartbeat` in ./rabbitmq/rabbitmq.conf.
       AMQP_HEARTBEAT: "10"
-      JOB_STORAGE_DIR: /ssg-worker/build_temp
-      PUBLISHED_DIR: /ssg-worker/published
       # Where collectives-mock serves ./published (:8081); publish_url is built from it.
       PUBLISH_BASE_URL: "http://127.0.0.1:8081"
       MAX_DOWNLOAD_MB: "256"
@@ -85,8 +84,8 @@ services:
       # Keeps the image's vendor/ visible under the mount above. A host-side
       # `composer require` needs a `docker compose build` to take effect.
       - /ssg-worker/vendor
-      - ./build_temp:/ssg-worker/build_temp
-      - ./published:/ssg-worker/published
+      - ./build_temp:/ssg-worker/var/build_temp
+      - ./published:/ssg-worker/var/published
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -100,7 +99,7 @@ services:
       context: ./collectives-mock
     image: collectives-mock-dev
     environment:
-      <<: *tz
+      TZ: "${TZ:-Europe/Berlin}"
     ports:
       - "127.0.0.1:8081:8081"
       - "127.0.0.1:8082:8082"
