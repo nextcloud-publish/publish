@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docker/rabbitmq/definitions.json`, which the admin creates from `definitions.example.json` with
   a hash of `RABBITMQ_PASSWORD`.
 - The wiki page Deploy publish, which sets up the production sample.
+- The wiki pages live in `docs/wiki/`; CI pushes them to the GitHub wiki on every push to `main`.
 
 ### Changed
 
@@ -37,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Responses carry no `X-Powered-By` header with the PHP version.
 - The RabbitMQ user in dev is `publish` instead of `app`, password `secret`. The dev broker config
   is in `docker/dev/rabbitmq/`.
+- The development guide and the tests moved from the README to the wiki page Development.
+- The README keeps the API link. The layout moved to the wiki page Home, authentication and
+  queueing to How it works, the log messages to Troubleshooting, the image tags to Deploy publish
+  and the release rule to Development.
 
 ## [0.2.0] - 2026-10-30
 

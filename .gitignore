@@ -20,3 +20,7 @@
 /docker/pages/
 /docker/logs/
 ###< docker production sample ###
+
+###> docker dev stack ###
+/docker/dev/.env
+###< docker dev stack ###

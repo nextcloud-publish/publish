@@ -7,6 +7,8 @@ name: publish-dev
 #   └── ssg-worker/   built and mounted from ../../../ssg-worker
 #
 #   docker compose -f docker/dev/compose.yaml up --build
+#
+# Reads docker/dev/.env, created from .env.example, for host ids other than 1000.
 
 services:
   web:

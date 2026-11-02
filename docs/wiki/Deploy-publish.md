@@ -137,13 +137,31 @@ docker compose pull
 docker compose up -d
 ```
 
+nginx in `web` resolves `publish` only when it starts. When `up -d` recreated `publish`, restart
+`web`, or the API answers `502`:
+
+```bash
+docker compose restart web
+```
+
 To stay on one release instead of `latest`, set `PUBLISH_IMAGE` and `SSG_WORKER_IMAGE` in `.env`,
-e.g. `ghcr.io/nextcloud-publish/publish:1.2.3`.
+e.g. `ghcr.io/nextcloud-publish/publish:1.2.3`. Both images have these tags:
+
+| Tag | Points to |
+| --- | --- |
+| `latest` | the newest release |
+| `1`, `1.2` | the newest release of that major or minor version (no `0` during 0.x) |
+| `1.2.3` | one release |
+| `main` | the newest build of `main` |
+| `<branch>` | the newest build of a pull request from that branch; `/` becomes `-` |
+| `sha-<commit>` | the build of one commit |
 
 ### Change the RabbitMQ password
 
 Set the new `RABBITMQ_PASSWORD` in `.env`, hash it as in step 4 and replace the hash in
-`rabbitmq/definitions.json`. RabbitMQ reads the file only when it starts:
+`rabbitmq/definitions.json`. RabbitMQ reads the file only when it starts, and then replaces the
+stored password, also in an existing `rabbitmq-data` volume. `down` and `up` recreate every
+container, so `web` also finds the new `publish`:
 
 ```bash
 docker compose down
