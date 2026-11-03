@@ -79,7 +79,7 @@ paths:
       summary: Queue a build
       description: |
         Answers `202` only after the broker confirms the message.
-        Fields other than the five below are ignored.
+        Fields other than the six below are ignored.
       requestBody:
         required: true
         content:
@@ -231,6 +231,12 @@ components:
           allOf: [$ref: '#/components/schemas/HttpUrl']
           description: Where ssg-worker `PATCH`es the outcome; see the `buildStatus` callback.
           examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/status']
+        render_options:
+          description: |
+            Any JSON value, passed unchecked to ssg-library, which validates it; see its
+            [render options](https://github.com/nextcloud-publish/ssg-library#render-options).
+            An invalid value is not a `400`: the build ends with a `failed` callback.
+          examples: [{ theme: colorful }]
 
     Invalid:
       type: object

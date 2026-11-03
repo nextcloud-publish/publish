@@ -152,6 +152,8 @@ final class BuildController
             content_download_url: $fields['content_download_url'],
             callback_status_url: $fields['callback_status_url'],
             created_at: (new \DateTimeImmutable('now'))->format(\DateTimeInterface::ATOM),
+            // Unchecked: ssg-library validates it, and an invalid value ends the build as failed.
+            render_options: $payload['render_options'] ?? null,
         );
 
         // The ids identify the build; the URLs would repeat them.
