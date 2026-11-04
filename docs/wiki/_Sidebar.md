@@ -1,0 +1,6 @@
+- [Home](https://github.com/nextcloud-publish/publish/wiki)
+- [How it works](https://github.com/nextcloud-publish/publish/wiki/How-it-works)
+- [Deploy publish](https://github.com/nextcloud-publish/publish/wiki/Deploy-publish)
+- [Troubleshooting](https://github.com/nextcloud-publish/publish/wiki/Troubleshooting)
+- [Development](https://github.com/nextcloud-publish/publish/wiki/Development)
+- [API reference](https://nextcloud-publish.github.io/publish/)

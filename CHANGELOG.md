@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Logging with Monolog to `var/log/publish.log` and stderr, in line format, from `LOG_LEVEL` up
+  (`info`, `debug` in dev). Every line carries the container's `hostname` and a `uid` per request.
+  The `request`, `security` and `messenger` channels write from `warning` up in prod.
+- `POST /build` logs `Build enqueued` with the `build_id`, `Build request rejected` with the
+  reason, and `Could not enqueue build` with the exception behind a `503`. A wrong bearer token
+  logs `Rejected API token` with the client address.
+- Sentry through Monolog, in prod with `SENTRY_DSN`: `error` lines with an exception and
+  uncaught exceptions (500) become events, the request's earlier lines their breadcrumbs. A 4xx is
+  not sent.
+- `openapi.yaml`, an OpenAPI 3.1 spec of `GET /health`, `POST /build` and the status callback,
+  published with Redoc to GitHub Pages from `main`. A test checks the app's answers against it,
+  and CI lints it.
+- `docker/compose.yaml`, a production sample of nginx, the API, RabbitMQ and ssg-worker. It keeps
+  the published sites in `pages/`, the logs in `logs/` and the build scratch in the `build-temp`
+  volume, and uses the `:latest` images. RabbitMQ reads its user from
+  `docker/rabbitmq/definitions.json`, which the admin creates from `definitions.example.json` with
+  a hash of `RABBITMQ_PASSWORD`.
+- The wiki page Deploy publish, which sets up the production sample.
+- The wiki pages live in `docs/wiki/`; CI pushes them to the GitHub wiki on every push to `main`.
+
+### Changed
+
+- The dev stack serves the API with PHP-FPM behind nginx instead of PHP's built-in server, from
+  `docker/dev/Dockerfile`.
+- The image in GHCR runs PHP-FPM on port 9000, without dev dependencies, with `APP_ENV=prod` built
+  in, the cache warmed and OPcache not checking files for changes.
+- Responses carry no `X-Powered-By` header with the PHP version.
+- The RabbitMQ user in dev is `publish` instead of `app`, password `secret`. The dev broker config
+  is in `docker/dev/rabbitmq/`.
+- The development guide and the tests moved from the README to the wiki page Development.
+- The README keeps the API link. The layout moved to the wiki page Home, authentication and
+  queueing to How it works, the log messages to Troubleshooting, the image tags to Deploy publish
+  and the release rule to Development.
+
 ## [0.2.0] - 2026-10-30
 
 ### Changed
@@ -31,5 +69,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GHCR.
 - Pre-commit hooks that run the CI lint and test steps.
 
+[Unreleased]: https://github.com/nextcloud-publish/publish/compare/0.2.0...HEAD
 [0.2.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.2.0
 [0.1.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.1.0

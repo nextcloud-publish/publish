@@ -13,3 +13,14 @@
 /phpunit.xml
 /.phpunit.cache/
 ###< phpunit/phpunit ###
+
+###> docker production sample ###
+/docker/.env
+/docker/rabbitmq/definitions.json
+/docker/pages/
+/docker/logs/
+###< docker production sample ###
+
+###> docker dev stack ###
+/docker/dev/.env
+###< docker dev stack ###
