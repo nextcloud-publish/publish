@@ -80,7 +80,6 @@ services:
       AMQP_HEARTBEAT: "10"
       # Where collectives-mock serves ./published (:8081); publish_url is built from it.
       PUBLISH_BASE_URL: "http://127.0.0.1:8081"
-      MAX_DOWNLOAD_MB: "256"
     volumes:
       - ../../../ssg-worker:/ssg-worker
       # Keeps the image's vendor/ visible under the mount above. A host-side

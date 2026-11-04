@@ -89,6 +89,6 @@ a Sentry or GlitchTip project. Without them, nothing is sent.
 | --- | --- | --- |
 | Nextcloud gets `401` | publish: `Rejected API token` | Nextcloud's token must equal `PUBLISH_API_TOKEN` |
 | Nextcloud gets `503` | publish: `Could not enqueue build`; the exception names the cause | Check `docker compose ps`; for a refused login, hash `RABBITMQ_PASSWORD` into `rabbitmq/definitions.json` again |
-| A site is not published | ssg-worker: `Build failed`; the exception names the cause | e.g. Nextcloud refused the download, or it exceeded `MAX_DOWNLOAD_MB` |
+| A site is not published | ssg-worker: `Build failed`; the exception names the cause | e.g. Nextcloud refused the download |
 | Nextcloud never hears back | ssg-worker: `Could not report failed build` | ssg-worker must reach the `callback_status_url` Nextcloud sends |
 | Visitors get `403` on `/pages/` | the host proxy's error log | The proxy's user must be able to read `pages/` and every folder above it |

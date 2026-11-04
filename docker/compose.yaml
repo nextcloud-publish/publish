@@ -65,7 +65,6 @@ services:
       # Must match `heartbeat` in rabbitmq/rabbitmq.conf.
       AMQP_HEARTBEAT: "60"
       PUBLISH_BASE_URL: "${PUBLISH_BASE_URL:?set PUBLISH_BASE_URL in .env}"
-      MAX_DOWNLOAD_MB: "${MAX_DOWNLOAD_MB:-256}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       SENTRY_DSN: "${SSG_WORKER_SENTRY_DSN:-}"
     volumes:
