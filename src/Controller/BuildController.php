@@ -46,7 +46,7 @@ final class BuildController
      * Every value must be a string: anything else would reach BuildJob's `string` type as a TypeError instead of a 400.
      *
      * @param array<mixed> $payload The decoded request body.
-     * @return array{static_site_id: string, slug: string, title: string, content_download_url: string, callback_status_url: string} the checked fields
+     * @return array{static_site_id: string, slug: string, title: string, content_download_url: string, callback_status_url: string, render_options: array<array-key, mixed>} the checked fields
      * @throws \InvalidArgumentException with the error message for the 400 when $payload is invalid
      */
     private function validatePayload(array $payload): array
@@ -63,6 +63,7 @@ final class BuildController
             'content_download_url' => $this->validateUrl($payload['content_download_url'], 'content_download_url'),
             'callback_status_url' => $this->validateUrl($payload['callback_status_url'], 'callback_status_url'),
             'title' => $this->validateTitle($payload['title']),
+            'render_options' => $this->validateRenderOptions($payload['render_options'] ?? []),
         ];
     }
 
@@ -123,6 +124,24 @@ final class BuildController
     }
 
     /**
+     * Returns $value when it is a JSON object (an associative array, not a list).
+     * Keys and values are forwarded to the ssg library as-is and are not allow-listed here:
+     * this app has no knowledge of what rendering options the library understands.
+     *
+     * @param mixed $value The value to check.
+     * @return array<array-key, mixed> $value
+     * @throws \InvalidArgumentException if $value is not a JSON object
+     */
+    private function validateRenderOptions(mixed $value): array
+    {
+        if (!\is_array($value) || ($value !== [] && array_is_list($value))) {
+            throw new \InvalidArgumentException('render_options must be an object');
+        }
+
+        return $value;
+    }
+
+    /**
      * Enqueues a build and answers 202 once the broker confirms it.
      * Answers 401 for a missing or wrong token, 400 for an invalid payload and 503 when the build could not be enqueued.
      *
@@ -152,6 +171,7 @@ final class BuildController
             content_download_url: $fields['content_download_url'],
             callback_status_url: $fields['callback_status_url'],
             created_at: (new \DateTimeImmutable('now'))->format(\DateTimeInterface::ATOM),
+            render_options: $fields['render_options'],
         );
 
         // The ids identify the build; the URLs would repeat them.

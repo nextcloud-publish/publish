@@ -19,6 +19,9 @@ namespace App\Message;
  * @param string $content_download_url Download url for the build assets.
  * @param string $callback_status_url Callback url to update the build status.
  * @param string $created_at Timestamp when the job was created by the publish API.
+ * @param array<array-key, mixed> $render_options Arbitrary options forwarded to the ssg library as-is.
+ *                                             BuildController does not allow-list its keys or values,
+ *                                             so ssg-worker must treat them as untrusted input.
  */
 final class BuildJob
 {
@@ -30,6 +33,8 @@ final class BuildJob
         public readonly string $content_download_url,
         public readonly string $callback_status_url,
         public readonly string $created_at,
+        /** @var array<array-key, mixed> */
+        public readonly array $render_options = [],
     ) {
     }
 }

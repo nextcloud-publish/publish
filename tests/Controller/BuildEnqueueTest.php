@@ -80,6 +80,7 @@ final class BuildEnqueueTest extends TestCase
                 self::assertSame(self::PAYLOAD['content_download_url'], $build->content_download_url);
                 self::assertSame(self::PAYLOAD['callback_status_url'], $build->callback_status_url);
                 self::assertSame(self::PAYLOAD['title'], $build->title);
+                self::assertSame([], $build->render_options);
 
                 self::assertInstanceOf(UuidV7::class, Uuid::fromString($build->build_id));
 
@@ -102,6 +103,63 @@ final class BuildEnqueueTest extends TestCase
             (string) $response->getContent(),
         );
         self::assertTrue($this->logged->hasInfoThatContains('Build enqueued'));
+    }
+
+    public function testPassesRenderOptionsThroughUnchecked(): void
+    {
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(function (BuildJob $build): bool {
+                self::assertSame(['theme' => 'colorful', 'further_key' => 'further value'], $build->render_options);
+
+                return true;
+            }))
+            ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
+
+        $payload = [
+            ...self::PAYLOAD,
+            'render_options' => ['theme' => 'colorful', 'further_key' => 'further value'],
+        ];
+
+        $controller = self::controller($bus);
+        $response = $controller(self::request($payload));
+
+        self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
+    }
+
+    public function testRejectsARenderOptionsListWithoutDispatching(): void
+    {
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->never())->method('dispatch');
+
+        $payload = [...self::PAYLOAD, 'render_options' => ['colorful', 'minimal']];
+
+        $controller = self::controller($bus);
+        $response = $controller(self::request($payload));
+
+        self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
+        self::assertJsonStringEqualsJsonString(
+            '{"status":"invalid","error":"render_options must be an object"}',
+            (string) $response->getContent(),
+        );
+    }
+
+    public function testRejectsANonObjectRenderOptionsWithoutDispatching(): void
+    {
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->never())->method('dispatch');
+
+        $payload = [...self::PAYLOAD, 'render_options' => 'colorful'];
+
+        $controller = self::controller($bus);
+        $response = $controller(self::request($payload));
+
+        self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
+        self::assertJsonStringEqualsJsonString(
+            '{"status":"invalid","error":"render_options must be an object"}',
+            (string) $response->getContent(),
+        );
     }
 
     public function testReturns503WhenDispatchFails(): void

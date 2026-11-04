@@ -49,7 +49,7 @@ paths:
       summary: Queue a build
       description: |
         Answers `202` only after the broker confirms the message.
-        Fields other than the five below are ignored.
+        Fields other than the six below are ignored.
       requestBody:
         required: true
         content:
@@ -187,6 +187,12 @@ components:
           allOf: [$ref: '#/components/schemas/HttpUrl']
           description: Where ssg-worker `PUT`s the outcome; see the `buildStatus` callback.
           examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/status']
+        render_options:
+          type: object
+          description: |
+            Forwarded to the ssg library as-is. Not allow-listed: its keys and values are opaque
+            to publish. Defaults to `{}` when omitted.
+          examples: [{ theme: colorful, further_key: further value }]
 
     Invalid:
       type: object
