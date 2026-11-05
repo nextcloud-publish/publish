@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Controller;
 
+use App\Entity\StaticSite;
 use App\Message\BuildJob;
+use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Handler\TestHandler;
 use Monolog\Level;
 use Monolog\LogRecord;
@@ -28,11 +30,11 @@ final class BuildControllerTest extends WebTestCase
 
     /** A complete, valid build request payload. */
     private const PAYLOAD = [
-        'static_site_id' => '1234-5678',
+        'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         'slug' => 'some_collective',
         'title' => 'Some Collective',
-        'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-        'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+        'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
     ];
 
     /**
@@ -46,6 +48,21 @@ final class BuildControllerTest extends WebTestCase
         self::assertInstanceOf(InMemoryTransport::class, $transport);
 
         return $transport->getSent();
+    }
+
+    /**
+     * Returns the stored StaticSite for $id, read fresh from the test database.
+     *
+     * @param string $id The static_site_id, lower case.
+     * @return ?StaticSite the site, null when there is no row
+     */
+    private static function storedSite(string $id): ?StaticSite
+    {
+        // Clears what the request loaded, so find() reads the row instead of the identity map.
+        $entityManager = static::getContainer()->get(EntityManagerInterface::class);
+        $entityManager->clear();
+
+        return $entityManager->find(StaticSite::class, Uuid::fromString($id));
     }
 
     /**
@@ -97,7 +114,7 @@ final class BuildControllerTest extends WebTestCase
         $build = $sent[0]->getMessage();
         self::assertInstanceOf(BuildJob::class, $build);
         self::assertTrue(Uuid::isValid($build->build_id));
-        self::assertSame('1234-5678', $build->static_site_id);
+        self::assertSame('0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70', $build->static_site_id);
         self::assertSame('some_collective', $build->slug);
 
         self::assertSame('Some Collective', $build->title);
@@ -107,7 +124,7 @@ final class BuildControllerTest extends WebTestCase
         self::assertSame(Level::Info, $logged[0]->level);
         self::assertSame('Build enqueued', $logged[0]->message);
         self::assertSame(
-            ['build_id' => $build->build_id, 'static_site_id' => '1234-5678', 'slug' => 'some_collective'],
+            ['build_id' => $build->build_id, 'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70', 'slug' => 'some_collective'],
             $logged[0]->context,
         );
     }
@@ -145,11 +162,11 @@ final class BuildControllerTest extends WebTestCase
     {
         $client = static::createClient();
         $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
             'slug' => 'my-team-handbook',
             'title' => 'My Team Handbook',
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         ], self::AUTH);
 
         self::assertResponseStatusCodeSame(202);
@@ -194,11 +211,11 @@ final class BuildControllerTest extends WebTestCase
     {
         $client = static::createClient();
         $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
             'slug' => 'some_collective',
             'title' => 'Some Collective',
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
             $field => $value,
         ], self::AUTH);
 
@@ -208,16 +225,106 @@ final class BuildControllerTest extends WebTestCase
         self::assertCount(0, self::sentToBuilds(), 'an unsafe name must never be enqueued');
     }
 
+    /**
+     * Provides static_site_id values that are safe directory names but no UUIDs.
+     *
+     * @return array<string, array{string, mixed}> field name and invalid value, keyed by case name
+     */
+    public static function provideInvalidStaticSiteIds(): array
+    {
+        return [
+            'static_site_id: safe id, no UUID' => ['static_site_id', '1234-5678'],
+            'static_site_id: UUID without dashes' => ['static_site_id', '0192f3c47b1e7a3e9f4c2d5e8a1b6c70'],
+            'static_site_id: UUID in braces' => ['static_site_id', '{0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70}'],
+            'static_site_id: integer' => ['static_site_id', 42],
+        ];
+    }
+
+    #[DataProvider('provideInvalidStaticSiteIds')]
+    public function testBuildRejectedOnAStaticSiteIdThatIsNoUuid(string $field, mixed $value): void
+    {
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', [...self::PAYLOAD, $field => $value], self::AUTH);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertJsonStringEqualsJsonString(
+            '{"status":"invalid","error":"static_site_id must be a UUID"}',
+            (string) $client->getResponse()->getContent(),
+        );
+        self::assertCount(0, self::sentToBuilds());
+    }
+
+    public function testAnAcceptedRequestIsStored(): void
+    {
+        $id = Uuid::v7()->toRfc4122();
+
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', [...self::PAYLOAD, 'static_site_id' => $id, 'collective_id' => 42], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+
+        $site = self::storedSite($id);
+        self::assertNotNull($site);
+        self::assertSame(42, $site->collectiveId);
+        self::assertSame(self::PAYLOAD['slug'], $site->slug);
+        self::assertSame(self::PAYLOAD['title'], $site->title);
+    }
+
+    public function testARepeatedRequestUpdatesTheStoredSite(): void
+    {
+        $id = Uuid::v7()->toRfc4122();
+
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', [...self::PAYLOAD, 'static_site_id' => $id, 'collective_id' => 42], self::AUTH);
+        $client->jsonRequest('POST', '/build', [...self::PAYLOAD, 'static_site_id' => $id, 'title' => 'Renamed'], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+
+        $site = self::storedSite($id);
+        self::assertNotNull($site);
+        self::assertSame('Renamed', $site->title);
+        self::assertNull($site->collectiveId);
+    }
+
+    /**
+     * Provides collective_id values the app rejects.
+     *
+     * @return array<string, array{mixed}> the collective_id value, keyed by case name
+     */
+    public static function provideInvalidCollectiveIds(): array
+    {
+        return [
+            'zero' => [0],
+            'negative' => [-1],
+            'numeric string' => ['42'],
+            'float' => [1.5],
+        ];
+    }
+
+    #[DataProvider('provideInvalidCollectiveIds')]
+    public function testBuildRejectedOnAnInvalidCollectiveId(mixed $collectiveId): void
+    {
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/build', [...self::PAYLOAD, 'collective_id' => $collectiveId], self::AUTH);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertJsonStringEqualsJsonString(
+            '{"status":"invalid","error":"collective_id must be a positive integer"}',
+            (string) $client->getResponse()->getContent(),
+        );
+        self::assertCount(0, self::sentToBuilds());
+    }
+
     /** Without the is_string() check, the TypeError from BuildJob would be caught as a 503. */
     public function testANonStringSlugIsABadRequestNotAServiceError(): void
     {
         $client = static::createClient();
         $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
             'slug' => ['not', 'a', 'string'],
             'title' => 'Some Collective',
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         ], self::AUTH);
 
         self::assertResponseStatusCodeSame(400);
@@ -293,11 +400,11 @@ final class BuildControllerTest extends WebTestCase
     {
         $client = static::createClient();
         $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
             'slug' => 'some_collective',
             'title' => $title,
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         ], self::AUTH);
 
         self::assertResponseStatusCodeSame(400);
@@ -309,10 +416,10 @@ final class BuildControllerTest extends WebTestCase
     {
         $client = static::createClient();
         $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
             'slug' => 'some_collective',
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         ], self::AUTH);
 
         self::assertResponseStatusCodeSame(400);

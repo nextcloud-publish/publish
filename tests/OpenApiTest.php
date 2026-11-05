@@ -6,6 +6,7 @@ namespace App\Tests;
 
 use App\Controller\BuildController;
 use App\Tests\Controller\BuildControllerTest;
+use Doctrine\ORM\EntityManagerInterface;
 use League\OpenAPIValidation\PSR7\Exception\ValidationFailed;
 use League\OpenAPIValidation\PSR7\OperationAddress;
 use League\OpenAPIValidation\PSR7\ValidatorBuilder;
@@ -32,11 +33,11 @@ final class OpenApiTest extends WebTestCase
     private const AUTH = ['HTTP_AUTHORIZATION' => 'Bearer test-api-token-0123456789'];
 
     private const PAYLOAD = [
-        'static_site_id' => '1234-5678',
+        'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         'slug' => 'some_collective',
         'title' => 'Some Collective',
-        'content_download_url' => 'https://cloud.example.org/collectives/publish/1234-5678',
-        'callback_status_url' => 'https://cloud.example.org/collectives/publish/1234-5678',
+        'content_download_url' => 'https://cloud.example.org/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'callback_status_url' => 'https://cloud.example.org/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
     ];
 
     /**
@@ -190,7 +191,7 @@ final class OpenApiTest extends WebTestCase
         $bus->method('dispatch')->willThrowException(new TransportException('connection refused'));
 
         $request = Request::create('/build', 'POST', content: json_encode(self::PAYLOAD, JSON_THROW_ON_ERROR));
-        $response = (new BuildController($bus, new NullLogger()))($request);
+        $response = (new BuildController($bus, new NullLogger(), $this->createStub(EntityManagerInterface::class)))($request);
 
         self::assertSame(503, $response->getStatusCode());
         $this->assertAnswerMatchesSpec($response, 'post', '/build');
