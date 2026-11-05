@@ -32,11 +32,32 @@ services:
       PUBLISH_API_TOKEN: "${PUBLISH_API_TOKEN:?set PUBLISH_API_TOKEN in .env}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       SENTRY_DSN: "${PUBLISH_SENTRY_DSN:-}"
+      DATABASE_URL: "postgresql://publish:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/publish?serverVersion=18&charset=utf8"
     volumes:
       - ./logs/publish:/publish/var/log
     depends_on:
       rabbitmq:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+      POSTGRES_USER: publish
+      POSTGRES_DB: publish
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+    volumes:
+      # Postgres 18 images keep their data under /var/lib/postgresql/<major>/,
+      # so the volume goes on the parent directory, not on .../data.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U publish -d publish"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
   rabbitmq:
@@ -79,4 +100,5 @@ services:
 
 volumes:
   rabbitmq-data:
+  postgres-data:
   build-temp:

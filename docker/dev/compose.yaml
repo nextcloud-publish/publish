@@ -36,12 +36,35 @@ services:
       AMQP_DSN: "amqp://publish:secret@rabbitmq:5672/%2f"
       AMQP_HEARTBEAT: "10"
       PUBLISH_API_TOKEN: "dev-api-token-0123456789"
+      DATABASE_URL: "postgresql://publish:secret@postgres:5432/publish?serverVersion=18&charset=utf8"
     volumes:
       - ../..:/publish
       - /publish/vendor
     depends_on:
       rabbitmq:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+      POSTGRES_USER: publish
+      POSTGRES_DB: publish
+      POSTGRES_PASSWORD: secret
+    volumes:
+      # Postgres 18 images keep their data under /var/lib/postgresql/<major>/,
+      # so the volume goes on the parent directory, not on .../data.
+      - postgres-data:/var/lib/postgresql
+    # No published port on purpose: this database serves the publish container only.
+    # bin/console and the tests on the host use a Postgres on the host (see the wiki's
+    # Development page), which would collide with a published 5432.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U publish -d publish"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   rabbitmq:
     image: rabbitmq:4-management
@@ -109,3 +132,4 @@ services:
 
 volumes:
   rabbitmq-data:
+  postgres-data:

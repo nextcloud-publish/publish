@@ -16,7 +16,7 @@ permissions:
 
 env:
   PHP_VERSION: '8.5'
-  PHP_EXTENSIONS: ctype, iconv, amqp, xml, mbstring
+  PHP_EXTENSIONS: ctype, iconv, amqp, xml, mbstring, pdo_pgsql
   REDOCLY_CLI: '@redocly/cli@2.72.1'
   REDOCLY_TELEMETRY: 'off'
 
@@ -62,6 +62,21 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    services:
+      # Same credentials as the dev stack, so DATABASE_URL from .env works unchanged.
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: publish
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: publish
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U publish"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
 
@@ -74,6 +89,13 @@ jobs:
 
       - name: Install dependencies
         uses: ramsey/composer-install@v4
+
+      # The recipe's dbname_suffix makes this publish_test. --allow-no-migration keeps the
+      # step green while migrations/ is still empty.
+      - name: Prepare test database
+        run: |
+          php bin/console doctrine:database:create --env=test --if-not-exists
+          php bin/console doctrine:migrations:migrate --env=test --no-interaction --allow-no-migration
 
       - name: PHPUnit
         run: vendor/bin/phpunit

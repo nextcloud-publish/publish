@@ -102,6 +102,55 @@ shows how to follow one build through both files by its `build_id`.
 - `docker compose logs collectives-mock` shows the status callbacks ssg-worker sent.
 - `docker/dev/published/` holds the published sites, `docker/dev/build_temp/` a running build.
 
+## Database
+
+publish uses Doctrine ORM on Postgres 18. Development has two databases:
+
+- **In the dev stack:** the `postgres` container, user `publish`, password `secret`, database
+  `publish`. Only the `publish` container reaches it; its port is not published on the host.
+- **On the host:** for `bin/console`, PHPUnit and the pre-commit hook run on the host. `.env`
+  points them at `127.0.0.1:5432` with the same user and password.
+
+| Task | Command |
+| --- | --- |
+| Add or change an entity | `php bin/console make:entity` |
+| Generate a migration from the entity changes | `php bin/console make:migration --formatted` |
+| Apply pending migrations | `php bin/console doctrine:migrations:migrate --no-interaction` |
+| Run SQL | `php bin/console dbal:run-sql "SELECT version()"` |
+
+Commit the generated files under `migrations/`; deployments apply them with `migrate`. Run them
+on the host, or in the `publish` container with `docker compose -f docker/dev/compose.yaml exec
+publish …` to act on the dev stack's database instead.
+
+### Set up Postgres on the host
+
+1. Install the PHP driver. Without it Doctrine fails with `could not find driver`.
+   - Arch, Manjaro: `sudo pacman -S php-pgsql`, then enable `extension=pdo_pgsql` in
+     `/etc/php/php.ini`.
+   - Debian, Ubuntu: `sudo apt install php8.5-pgsql`.
+
+   `php -m | grep pdo_pgsql` confirms it.
+2. Install and start Postgres from your distribution, then create the user and database. The
+   user needs `CREATEDB`, because the tests' database is created by it:
+
+   ```bash
+   sudo -u postgres psql -c "CREATE ROLE publish WITH LOGIN PASSWORD 'secret' CREATEDB;"
+   sudo -u postgres createdb -O publish publish
+   ```
+3. `php bin/console dbal:run-sql "SELECT version()"` should print the server version.
+
+If your host Postgres is not version 18, or you use another user or port, put your own
+`DATABASE_URL` into `.env.local`, which git ignores, rather than changing `.env`. Keep
+`serverVersion` at your server's major version, Doctrine generates its SQL for it:
+
+```dotenv
+DATABASE_URL="postgresql://publish:secret@127.0.0.1:5432/publish?serverVersion=17&charset=utf8"
+```
+
+`password authentication failed` or `no pg_hba.conf entry` means the server does not accept
+password logins over TCP. Set the method of the `host … 127.0.0.1/32` line in its `pg_hba.conf`
+(`/var/lib/postgres/data/` on Arch) to `scram-sha-256`, then `sudo systemctl reload postgresql`.
+
 ## PHPUnit
 
 The tests send the token from `.env.test`. The container's `PUBLISH_API_TOKEN` would win over it,
@@ -115,6 +164,17 @@ With PHP 8.5 and `composer install` on the host, `php bin/phpunit` works too. Th
 in-memory transport and need no broker. `tests/OpenApiTest.php` checks every answer against
 `openapi.yaml`.
 
+The tests do need a database: they use `publish_test` (Doctrine appends `_test` in the test env)
+on the [host Postgres](#set-up-postgres-on-the-host). Create it once, and migrate it after every
+new migration:
+
+```bash
+php bin/console doctrine:database:create --env=test --if-not-exists
+php bin/console doctrine:migrations:migrate --env=test --no-interaction --allow-no-migration
+```
+
+Inside the `publish` container the same commands use the dev stack's Postgres instead.
+
 ## PHPStan
 
 PHPStan checks `src/` and `tests/` at level 10. It reads the service container from
@@ -127,7 +187,8 @@ docker compose -f docker/dev/compose.yaml exec publish sh -c 'php bin/console ca
 ## pre-commit
 
 [pre-commit](https://pre-commit.com/) runs the CI lint steps, PHPStan and the tests before each
-commit. It needs PHP 8.5, `ext-amqp` and `composer install` on the host. Install the hook once:
+commit. It needs PHP 8.5, `ext-amqp`, `ext-pdo_pgsql` and `composer install` on the host, and
+the [host Postgres](#set-up-postgres-on-the-host) running for the tests. Install the hook once:
 
 ```bash
 pre-commit install
