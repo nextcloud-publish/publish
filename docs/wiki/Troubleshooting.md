@@ -10,7 +10,7 @@ Both services write the same lines to a file and to stderr:
 The files are not rotated; rotate them on the host. `web` and `rabbitmq` log to stderr only.
 
 ```text
-[2026-10-31T14:03:12.481920+00:00] app.INFO: Build enqueued {"build_id":"0199c3e2-…","static_site_id":"site-42","slug":"handbook"} {"hostname":"3f9a1c2b7d4e","uid":"a1b2c3d"}
+[2026-10-31T14:03:12.481920+00:00] app.INFO: Build enqueued {"build_id":"0199c3e2-…","static_site_id":"0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70","slug":"handbook"} {"hostname":"3f9a1c2b7d4e","uid":"a1b2c3d"}
 ```
 
 `LOG_LEVEL` in `.env` sets the lowest level both services write: `debug`, `info` (default),

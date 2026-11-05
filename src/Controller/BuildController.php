@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Entity\StaticSite;
 use App\Message\BuildJob;
+use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\Exception\JsonException;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -15,23 +17,25 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * Validates a build request and enqueues it as a BuildJob for ssg-worker.
+ * Validates a build request, stores it as a StaticSite and enqueues it as a BuildJob for ssg-worker.
  * The security firewall authenticates the request before this controller is resolved.
  *
  * @param MessageBusInterface $bus The bus that publishes the BuildJob to the `builds` transport.
  * @param LoggerInterface $logger The app logger.
+ * @param EntityManagerInterface $entityManager Stores the StaticSite.
  */
 final class BuildController
 {
     public function __construct(
         private readonly MessageBusInterface $bus,
         private readonly LoggerInterface $logger,
+        private readonly EntityManagerInterface $entityManager,
     ) {
     }
 
     /**
-     * Allow-list for static_site_id and slug, which ssg-worker uses as directory names without checking them again.
-     * Dots are excluded, so `..` cannot pass.
+     * Allow-list for slug, which ssg-worker uses as a directory name without checking it again.
+     * Dots are excluded, so `..` cannot pass. static_site_id, also a directory name, must be a UUID instead.
      */
     private const SAFE_ID = '/^[A-Za-z0-9_-]{1,128}$/';
 
@@ -42,11 +46,11 @@ final class BuildController
     private const ALLOWED_URL_SCHEMES = ['http', 'https'];
 
     /**
-     * Returns the build fields of $payload, title trimmed.
-     * Every value must be a string: anything else would reach BuildJob's `string` type as a TypeError instead of a 400.
+     * Returns the build fields of $payload, title trimmed and static_site_id in lower-case canonical form.
+     * Every required value must be a string: anything else would reach BuildJob's `string` type as a TypeError instead of a 400.
      *
      * @param array<mixed> $payload The decoded request body.
-     * @return array{static_site_id: string, slug: string, title: string, content_download_url: string, callback_status_url: string} the checked fields
+     * @return array{static_site_id: string, collective_id: ?int, slug: string, title: string, content_download_url: string, callback_status_url: string} the checked fields
      * @throws \InvalidArgumentException with the error message for the 400 when $payload is invalid
      */
     private function validatePayload(array $payload): array
@@ -58,7 +62,8 @@ final class BuildController
         }
 
         return [
-            'static_site_id' => $this->validateSafeId($payload['static_site_id'], 'static_site_id'),
+            'static_site_id' => $this->validateUuid($payload['static_site_id'], 'static_site_id'),
+            'collective_id' => $this->validateCollectiveId($payload['collective_id'] ?? null),
             'slug' => $this->validateSafeId($payload['slug'], 'slug'),
             'content_download_url' => $this->validateUrl($payload['content_download_url'], 'content_download_url'),
             'callback_status_url' => $this->validateUrl($payload['callback_status_url'], 'callback_status_url'),
@@ -78,6 +83,40 @@ final class BuildController
     {
         if (!\is_string($value) || preg_match(self::SAFE_ID, $value) !== 1) {
             throw new \InvalidArgumentException(sprintf('%s must match [A-Za-z0-9_-]{1,128}', $field));
+        }
+
+        return $value;
+    }
+
+    /**
+     * Returns $value in lower-case canonical form when it is a UUID string.
+     * ssg-worker uses static_site_id as a directory name, so one site must not arrive in two spellings.
+     *
+     * @param mixed $value The value to check.
+     * @param string $field The field name for the error message.
+     * @return string the UUID, lower case
+     * @throws \InvalidArgumentException if $value is not a UUID
+     */
+    private function validateUuid(mixed $value, string $field): string
+    {
+        if (!\is_string($value) || !Uuid::isValid($value)) {
+            throw new \InvalidArgumentException(sprintf('%s must be a UUID', $field));
+        }
+
+        return Uuid::fromString($value)->toRfc4122();
+    }
+
+    /**
+     * Returns $value when it is null or a positive integer.
+     *
+     * @param mixed $value The value to check; null when the request carried none.
+     * @return ?int $value
+     * @throws \InvalidArgumentException if $value is neither
+     */
+    private function validateCollectiveId(mixed $value): ?int
+    {
+        if ($value !== null && (!\is_int($value) || $value < 1)) {
+            throw new \InvalidArgumentException('collective_id must be a positive integer');
         }
 
         return $value;
@@ -160,6 +199,19 @@ final class BuildController
             'static_site_id' => $build->static_site_id,
             'slug' => $build->slug,
         ];
+
+        // One DB entry per static_site_id; a repeated request for the same static_site_id updates it
+        // Doctrine ORM operates like "collect ALL changes, then persist in one transaction"
+        // If entry found change tracking begins here
+        $site = $this->entityManager->find(StaticSite::class, Uuid::fromString($build->static_site_id));
+        if ($site === null) {
+            $site = new StaticSite(Uuid::fromString($build->static_site_id), $fields['collective_id'], $build->slug, $build->title);
+            $this->entityManager->persist($site); # let entity manager manage this object
+        } else {
+            $site->update($fields['collective_id'], $build->slug, $build->title);
+        }
+        # entitymanager writes ALL tracked changes of ALL managed objects in one DB transaction
+        $this->entityManager->flush();
 
         try {
             // Blocks until the broker confirms the publish (confirm_timeout in config/packages/messenger.yaml).

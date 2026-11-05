@@ -6,7 +6,7 @@ FROM alpine:latest
 
 # openssl and zip are for composer.
 RUN apk add --no-cache \
-        php85 php85-fpm php85-pecl-amqp \
+        php85 php85-fpm php85-pecl-amqp php85-pdo php85-pdo_pgsql \
         php85-ctype php85-iconv php85-simplexml php85-xml \
         php85-dom php85-mbstring php85-tokenizer php85-xmlwriter \
         php85-curl php85-phar php85-openssl php85-zip \

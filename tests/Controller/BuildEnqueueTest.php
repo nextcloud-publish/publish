@@ -6,6 +6,7 @@ namespace App\Tests\Controller;
 
 use App\Controller\BuildController;
 use App\Message\BuildJob;
+use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Handler\TestHandler;
 use Monolog\Level;
 use Monolog\Logger;
@@ -27,9 +28,9 @@ final class BuildEnqueueTest extends TestCase
 {
     /** A complete, valid build request payload. */
     private const PAYLOAD = [
-        'static_site_id' => '1234-5678',
-        'content_download_url' => 'https://cloud.example.com/collectives/publish/1234-5678',
-        'callback_status_url' => 'https://cloud.example.com/collectives/publish/1234-5678',
+        'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'content_download_url' => 'https://cloud.example.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'callback_status_url' => 'https://cloud.example.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         'slug' => 'some_collective',
         'title' => 'Some Collective',
     ];
@@ -66,7 +67,7 @@ final class BuildEnqueueTest extends TestCase
      */
     private function controller(MessageBusInterface $bus): BuildController
     {
-        return new BuildController($bus, new Logger('app', [$this->logged]));
+        return new BuildController($bus, new Logger('app', [$this->logged]), $this->createStub(EntityManagerInterface::class));
     }
 
     public function testDispatchesBuildJobAndReturns202(): void

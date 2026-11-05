@@ -44,7 +44,13 @@ base64url all qualify.
 publish checks every field of a build request; the
 [API reference](https://nextcloud-publish.github.io/publish/) lists the rules. ssg-worker does not
 check them again and uses `static_site_id`, `slug` and `build_id` as directory names, so publish
-is the only check.
+is the only check. `static_site_id` must be a UUID.
+
+## Stored sites
+
+Before it enqueues a build, `BuildController` stores the request in Postgres as an
+`App\Entity\StaticSite`, table `static_site`, one row per `static_site_id`: the optional
+`collective_id`, `slug` and `title`. A repeated request for the same site updates its row.
 
 ## The build message
 

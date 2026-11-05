@@ -166,9 +166,18 @@ components:
       required: [static_site_id, slug, title, content_download_url, callback_status_url]
       properties:
         static_site_id:
-          allOf: [$ref: '#/components/schemas/SafeId']
-          description: The site's directory under the published root.
-          examples: ['1234-5678']
+          type: string
+          format: uuid
+          pattern: '^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$'
+          description: Identifies the site across builds, and is its directory under the published root.
+          examples: ['0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70']
+        collective_id:
+          type: [integer, 'null']
+          minimum: 1
+          description: >-
+            Id of the collective the site is published from, as per `lib/Db/Collective.php` in the
+            Collectives repo. Optional.
+          examples: [42]
         slug:
           allOf: [$ref: '#/components/schemas/SafeId']
           description: The directory the site is published under, inside `static_site_id`.
@@ -182,11 +191,11 @@ components:
         content_download_url:
           allOf: [$ref: '#/components/schemas/HttpUrl']
           description: The Collectives export (`.tar.gz`) ssg-worker downloads.
-          examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/content.tar.gz']
+          examples: ['https://cloud.example.org/apps/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70/content.tar.gz']
         callback_status_url:
           allOf: [$ref: '#/components/schemas/HttpUrl']
           description: Where ssg-worker `PUT`s the outcome; see the `buildStatus` callback.
-          examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/status']
+          examples: ['https://cloud.example.org/apps/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70/status']
 
     Invalid:
       type: object
@@ -226,7 +235,7 @@ components:
             publish_url:
               type: string
               format: uri
-              examples: ['https://sites.example.org/1234-5678/some_collective/']
+              examples: ['https://sites.example.org/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70/some_collective/']
 
     BuildFailed:
       type: object

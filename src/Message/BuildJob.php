@@ -14,7 +14,7 @@ namespace App\Message;
  * @param string $static_site_id Identifies the site across builds; used for the job's folder under JOB_STORAGE_DIR.
  * @param string $slug Names the published site directory under PUBLISHED_DIR which translates to the uri path of the published site.
  *                     It is restricted to [A-Za-z0-9_-]{1,128} and BuildController rejects anything else with a 400.
- *                     Slug uniqueness is not enforced: this service has no store, so two sites sending one slug overwrite each other's published site.
+ *                     Slug uniqueness is not enforced: the static_site table does not constrain it, so two sites sending one slug overwrite each other's published site.
  * @param string $title Site title, shown in the page header. Separate from $slug because the slug allow-list excludes spaces.
  * @param string $content_download_url Download url for the build assets.
  * @param string $callback_status_url Callback url to update the build status.

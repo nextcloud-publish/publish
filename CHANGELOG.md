@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `POST /build` stores each accepted request in the new `static_site` table, one row per
+  `static_site_id`. A repeated request updates the row.
+- `POST /build` accepts an optional `collective_id`, a positive integer or `null`.
+
+### Changed
+
+- **Breaking:** `POST /build` answers `400` unless `static_site_id` is a UUID.
+
 ## [0.3.0] - 2026-11-04
 
 ### Added

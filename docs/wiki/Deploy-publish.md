@@ -43,7 +43,7 @@ sudo chown -R 10001:10001 pages logs
 cp .env.example .env
 ```
 
-Set the three required values at the top. The comments in the file say how to generate them;
+Set the four required values at the top. The comments in the file say how to generate them;
 the optional values below them have their defaults.
 
 ## 4. Add the RabbitMQ user
@@ -112,7 +112,7 @@ directories and `0644` for files.
 docker compose up -d
 ```
 
-All services should be `running`, `web` and `rabbitmq` also `healthy`:
+All services should be `running`, `web`, `rabbitmq` and `postgres` also `healthy`:
 
 ```bash
 docker compose ps
@@ -135,6 +135,13 @@ docker compose pull
 
 ```bash
 docker compose up -d
+```
+
+Apply the database migrations of the new release. Already applied ones are skipped, so this is
+safe to run on every update:
+
+```bash
+docker compose exec publish php bin/console doctrine:migrations:migrate --no-interaction
 ```
 
 nginx in `web` resolves `publish` only when it starts. When `up -d` recreated `publish`, restart
