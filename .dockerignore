@@ -4,6 +4,7 @@
 .dockerignore
 docker
 !docker/php
+!docker/entrypoint.sh
 var
 vendor
 .phpunit.cache

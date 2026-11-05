@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.env`, generated as
+`.env.example` describes.
+
+### Added
+
+- A `postgres` service in `docker/compose.yaml`, with the `postgres-data` volume. `POSTGRES_USER`
+  and `POSTGRES_VERSION` in `.env` set its user and major version.
+- The `publish` container applies pending database migrations when it starts.
+
 ## [0.5.0] - 2026-11-15
 
 The sample's Compose project is `publish`, its nginx service `nginx-fpm-gateway`, and the worker
