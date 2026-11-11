@@ -36,6 +36,8 @@ base64url all qualify.
 - The check runs on `kernel.request`, before the controller: a malformed body without a token is a
   `401`. Routing runs earlier, so an unknown path is a `404`.
 - `/health` has `security: false`, so a probe with a stale `Authorization` header still gets `200`.
+- `/auth-verification` answers `200` only with a valid token, so Collectives can test its URL and
+  token before sending builds. A missing or wrong token is a `401`.
 - A blank `PUBLISH_API_TOKEN` answers every request with `401`. An unset one cannot be resolved,
   so a request with a token gets a `500`. Either way nothing is enqueued.
 

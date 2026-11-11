@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `GET /auth-verification` for clients testing their URL and API token: the same `{"status":"ok"}`
+  as `/health`, but only with a valid bearer token, `401` otherwise.
+- `openapi.yaml` documents `HEAD /health` for uptime monitors, and that `/health` is for
+  monitoring and `/auth-verification` for testing the token.
+
 ## [0.3.0] - 2026-11-04
 
 ### Added

@@ -20,7 +20,9 @@ tags:
   - name: Builds
     description: Build requests and the status callback.
   - name: Health
-    description: For healthchecks and monitoring.
+    description: |
+      `/health` is for container healthchecks and uptime monitoring, without a token.
+      `/auth-verification` is for clients testing the URL and API token.
 
 paths:
   /health:
@@ -28,7 +30,9 @@ paths:
       tags: [Health]
       operationId: getHealth
       summary: Health check
-      description: Public, for container healthchecks and monitoring. An `Authorization` header is ignored.
+      description: |
+        Public, for container healthchecks and uptime monitoring. Not a token test: an
+        `Authorization` header is ignored; use `/auth-verification` for that.
       security: []
       responses:
         '200':
@@ -36,11 +40,37 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [status]
-                properties:
-                  status:
-                    enum: ['ok']
+                $ref: '#/components/schemas/Ok'
+    head:
+      tags: [Health]
+      operationId: headHealth
+      summary: Health check without a body
+      description: |
+        `GET /health` for monitors that send `HEAD`: public, the same status code, no body.
+        Not a token test; use `/auth-verification` for that.
+      security: []
+      responses:
+        '200':
+          description: The app is up. It does not check the broker.
+
+  /auth-verification:
+    get:
+      tags: [Health]
+      operationId: verifyAuth
+      summary: Auth verification
+      description: |
+        For clients such as Collectives to test the URL and API token before sending builds.
+        Same answer as `/health`, but only with a valid bearer token. Not for monitoring, since
+        it needs the token.
+      responses:
+        '200':
+          description: The app is up and accepted the token. It does not check the broker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /build:
     post:
@@ -151,6 +181,13 @@ components:
         text/html: {}
 
   schemas:
+    Ok:
+      type: object
+      required: [status]
+      properties:
+        status:
+          enum: ['ok']
+
     SafeId:
       type: string
       pattern: '^[A-Za-z0-9_-]{1,128}$'
