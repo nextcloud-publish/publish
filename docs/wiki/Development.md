@@ -155,6 +155,20 @@ npx @redocly/cli build-docs openapi.yaml -o var/api-docs/index.html
 
 ## Release
 
-A release is a git tag like `1.2.3`, without a leading `v`, on `main`. It must match the version
-in `CHANGELOG.md`. CI then pushes the image with the tags listed in
-[Deploy publish](https://github.com/nextcloud-publish/publish/wiki/Deploy-publish#8-update).
+A release is a git tag like `1.2.3`, without a leading `v`, on `main`:
+
+1. Turn `## [Unreleased]` in `CHANGELOG.md` into a version section, add its link at the bottom,
+   commit and push to `main`.
+2. Tag the commit and push the tag:
+
+   ```bash
+   git tag -a 1.2.3 -m 1.2.3
+   git push origin 1.2.3
+   ```
+
+CI pushes the image with the tags listed in
+[Deploy publish](https://github.com/nextcloud-publish/publish/wiki/Deploy-publish#8-update), then
+creates the GitHub release from the version's CHANGELOG section, with the `docker pull` command
+after its first paragraph. A paragraph before the first `###` heading becomes the summary at the
+top of the release, and a second one, e.g. what to change before updating, follows the pull
+command.
