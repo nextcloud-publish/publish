@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `openapi.yaml` describes the status callback as a `PATCH` with the header `OCS-APIRequest: true`,
   as ssg-worker sends it.
+- Code is formatted to PSR-12, and CI and pre-commit check it with PHP-CS-Fixer.
 
 ## [0.3.0] - 2026-11-04
 

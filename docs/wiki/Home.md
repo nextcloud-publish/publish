@@ -37,6 +37,7 @@ tests/OpenApiTest.php      checks the app's answers against openapi.yaml
 openapi.yaml               the API spec, OpenAPI 3.1
 redocly.yaml               Redocly lint rules for the spec
 phpstan.dist.neon          PHPStan level and paths
+.php-cs-fixer.dist.php     PHP-CS-Fixer rules (PSR-12) and paths
 .pre-commit-config.yaml    the hooks run before each commit
 docs/wiki/                 the wiki pages, pushed to the GitHub wiki from main
 docker/

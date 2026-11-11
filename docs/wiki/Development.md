@@ -124,10 +124,20 @@ PHPStan checks `src/` and `tests/` at level 10. It reads the service container f
 docker compose -f docker/dev/compose.yaml exec publish sh -c 'php bin/console cache:warmup && vendor/bin/phpstan analyse'
 ```
 
+## Code style
+
+PHP-CS-Fixer checks `src/` and `tests/` against PSR-12; `fix` reformats them:
+
+```bash
+docker compose -f docker/dev/compose.yaml exec publish vendor/bin/php-cs-fixer check --diff
+docker compose -f docker/dev/compose.yaml exec publish vendor/bin/php-cs-fixer fix
+```
+
 ## pre-commit
 
-[pre-commit](https://pre-commit.com/) runs the CI lint steps, PHPStan and the tests before each
-commit. It needs PHP 8.5, `ext-amqp` and `composer install` on the host. Install the hook once:
+[pre-commit](https://pre-commit.com/) runs the CI lint steps, the style check, PHPStan and the
+tests before each commit. It needs PHP 8.5, `ext-amqp` and `composer install` on the host. Install
+the hook once:
 
 ```bash
 pre-commit install

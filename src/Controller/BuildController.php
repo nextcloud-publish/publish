@@ -116,7 +116,8 @@ final class BuildController
         $title = \is_string($value) ? trim($value) : '';
         if ($title === '' || mb_strlen($title) > self::MAX_TITLE_LENGTH) {
             throw new \InvalidArgumentException(
-                sprintf('title must be a non-empty string of at most %d characters', self::MAX_TITLE_LENGTH));
+                sprintf('title must be a non-empty string of at most %d characters', self::MAX_TITLE_LENGTH)
+            );
         }
 
         return $title;
