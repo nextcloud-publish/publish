@@ -79,7 +79,7 @@ publish answers `202` only after the broker confirms the message.
 
 ssg-worker takes one message at a time: it downloads the archive, extracts it, renders the pages
 with [ssg-library](https://github.com/nextcloud-publish/ssg-library), and swaps the site into
-`pages/<static_site_id>/<slug>/`. Then it PUTs the outcome to `callback_status_url`.
+`pages/<static_site_id>/<slug>/`. Then it PATCHes the outcome to `callback_status_url`.
 
 | Outcome | What happens |
 | --- | --- |

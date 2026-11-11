@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `openapi.yaml` documents `HEAD /health` for uptime monitors, and that `/health` is for
   monitoring and `/auth-verification` for testing the token.
 
+### Changed
+
+- `openapi.yaml` describes the status callback as a `PATCH` with the header `OCS-APIRequest: true`,
+  as ssg-worker sends it.
+
 ## [0.3.0] - 2026-11-04
 
 ### Added

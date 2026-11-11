@@ -6,7 +6,7 @@ info:
   summary: Takes build requests for static sites and queues them for ssg-worker.
   description: |
     `POST /build` checks a build request and queues it. ssg-worker renders the site and reports
-    the outcome with a `PUT` to the request's `callback_status_url`, described under the
+    the outcome with a `PATCH` to the request's `callback_status_url`, described under the
     `buildStatus` callback of `POST /build`.
   license:
     name: AGPL-3.0-or-later
@@ -125,13 +125,20 @@ paths:
       callbacks:
         buildStatus:
           '{$request.body#/callback_status_url}':
-            put:
+            patch:
               summary: Report the outcome of a build
               description: |
                 ssg-worker sends this once a build is published, or once it failed for good.
                 Delivery is at-least-once: dedupe on `(callback_status_url, status)` and treat a
                 status as final.
               security: []
+              parameters:
+                - name: OCS-APIRequest
+                  in: header
+                  required: true
+                  description: Lets the call pass Nextcloud's CSRF check without a login.
+                  schema:
+                    const: 'true'
               requestBody:
                 required: true
                 content:
@@ -222,7 +229,7 @@ components:
           examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/content.tar.gz']
         callback_status_url:
           allOf: [$ref: '#/components/schemas/HttpUrl']
-          description: Where ssg-worker `PUT`s the outcome; see the `buildStatus` callback.
+          description: Where ssg-worker `PATCH`es the outcome; see the `buildStatus` callback.
           examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/status']
 
     Invalid:

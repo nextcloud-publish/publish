@@ -64,7 +64,7 @@ curl -I http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/
 The second command answers `200`, and the mock logs the callback:
 
 ```text
-CALLBACK PUT /status/1234 -> 204 body={"status":"published","data":{"publish_url":"http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/"}}
+CALLBACK PATCH /status/1234 -> 204 body={"status":"published","data":{"publish_url":"http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/"}}
 ```
 
 ## Change code
