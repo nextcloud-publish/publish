@@ -415,4 +415,18 @@ final class BuildControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(401);
     }
+
+    public function testMalformedJsonWithATokenIsABadRequest(): void
+    {
+        // toArray() throws HttpFoundation's JsonException, a RequestExceptionInterface, which the kernel answers with 400.
+        $client = static::createClient();
+        $client->request(
+            'POST',
+            '/build',
+            server: ['CONTENT_TYPE' => 'application/json', ...self::AUTH],
+            content: 'not json at all',
+        );
+
+        self::assertResponseStatusCodeSame(400);
+    }
 }
