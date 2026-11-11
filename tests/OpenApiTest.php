@@ -140,6 +140,32 @@ final class OpenApiTest extends WebTestCase
         $this->assertAnswerMatchesSpec($client->getResponse(), 'get', '/health');
     }
 
+    /**
+     * Returns the server parameters of the /auth-verification cases: a valid token, none and a wrong one.
+     *
+     * @return array<string, array{array<string, string>}> the server parameters per case
+     */
+    public static function provideAuthVerificationRequests(): array
+    {
+        return [
+            'valid token' => [self::AUTH],
+            'no token' => [[]],
+            'wrong token' => [['HTTP_AUTHORIZATION' => 'Bearer not-the-configured-token']],
+        ];
+    }
+
+    /**
+     * @param array<string, string> $server The server parameters, carrying the Authorization header if any.
+     */
+    #[DataProvider('provideAuthVerificationRequests')]
+    public function testTheAuthVerificationAnswerMatchesTheSpec(array $server): void
+    {
+        $client = static::createClient();
+        $client->request('GET', '/auth-verification', server: $server);
+
+        $this->assertAnswerMatchesSpec($client->getResponse(), 'get', '/auth-verification');
+    }
+
     public function testTheSpecAcceptsAValidBuildRequestAndTheAppItsAnswer(): void
     {
         self::assertTrue(self::specAccepts(self::PAYLOAD));
