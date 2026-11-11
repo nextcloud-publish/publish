@@ -59,15 +59,20 @@ The body is JSON from Messenger's `symfony_serializer`; the class's property nam
 
 ```json
 { "build_id": "...", "static_site_id": "...", "slug": "...", "title": "...",
-  "content_download_url": "...", "callback_status_url": "...", "created_at": "..." }
+  "content_download_url": "...", "callback_status_url": "...", "created_at": "...",
+  "render_options": null }
 ```
 
 `build_id` is a UUID v7 publish generates per request. Messenger adds a `type` header with the
 class name and `X-Message-Stamp-*` headers.
 
+`render_options` is any JSON value from the request, `null` when it is absent. publish and
+ssg-worker pass it on unchecked; ssg-library validates it and lists the
+[options](https://github.com/nextcloud-publish/ssg-library#render-options).
+
 ssg-worker decodes the body into its own `App\Message\BuildJob`, found by the `type` header. Both
-classes have the same namespace, name and properties, and every property is required, so they
-change together; a message that does not decode is dropped without a callback.
+classes have the same namespace, name and properties. Every property except `render_options` is
+required, so they change together; a message that does not decode is dropped without a callback.
 
 ## RabbitMQ
 
@@ -85,7 +90,7 @@ with [ssg-library](https://github.com/nextcloud-publish/ssg-library), and swaps 
 | --- | --- |
 | Success | the site goes live, `published` with the `publish_url` is reported |
 | Transient failure | retried once after 15s through the `delays` exchange; a second failure reports `failed` |
-| Permanent failure | reported `failed` at once: an archive without a Markdown page, or a callback answered with a 3xx or a 4xx other than 408 and 429 |
+| Permanent failure | reported `failed` at once: an archive without a Markdown page, invalid `render_options`, or a callback answered with a 3xx or a 4xx other than 408 and 429 |
 
 The callback body is `{"status": "published", "data": {"publish_url": ...}}` or
 `{"status": "failed", "data": {"error_message": ...}}`. Delivery is at-least-once, so Nextcloud

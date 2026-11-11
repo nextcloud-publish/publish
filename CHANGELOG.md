@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `/health`, but only with a valid bearer token, `401` otherwise.
 - `openapi.yaml` documents `HEAD /health` for uptime monitors, and that `/health` is for
   monitoring and `/auth-verification` for testing the token.
+- `render_options` on `POST /build`: any JSON value, passed unchecked to ssg-worker and
+  ssg-library, which validates it. An invalid value ends the build with a `failed` callback.
 
 ### Changed
 

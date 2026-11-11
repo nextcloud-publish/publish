@@ -9,6 +9,7 @@ use App\Message\BuildJob;
 use Monolog\Handler\TestHandler;
 use Monolog\Level;
 use Monolog\Logger;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -80,6 +81,7 @@ final class BuildEnqueueTest extends TestCase
                 self::assertSame(self::PAYLOAD['content_download_url'], $build->content_download_url);
                 self::assertSame(self::PAYLOAD['callback_status_url'], $build->callback_status_url);
                 self::assertSame(self::PAYLOAD['title'], $build->title);
+                self::assertNull($build->render_options);
 
                 self::assertInstanceOf(UuidV7::class, Uuid::fromString($build->build_id));
 
@@ -102,6 +104,79 @@ final class BuildEnqueueTest extends TestCase
             (string) $response->getContent(),
         );
         self::assertTrue($this->logged->hasInfoThatContains('Build enqueued'));
+    }
+
+    public function testPassesRenderOptionsThroughUnchecked(): void
+    {
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(function (BuildJob $build): bool {
+                self::assertSame(['theme' => 'colorful', 'further_key' => 'further value'], $build->render_options);
+
+                return true;
+            }))
+            ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
+
+        $payload = [
+            ...self::PAYLOAD,
+            'render_options' => ['theme' => 'colorful', 'further_key' => 'further value'],
+        ];
+
+        $controller = self::controller($bus);
+        $response = $controller(self::request($payload));
+
+        self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
+    }
+
+    /**
+     * @return array<string, array{mixed}>
+     */
+    public static function nonObjectRenderOptions(): array
+    {
+        return [
+            'list' => [['colorful', 'minimal']],
+            'string' => ['colorful'],
+        ];
+    }
+
+    /** ssg-library validates render_options, so publish enqueues any value unchanged. */
+    #[DataProvider('nonObjectRenderOptions')]
+    public function testEnqueuesANonObjectRenderOptionsUnchanged(mixed $renderOptions): void
+    {
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(static function (BuildJob $build) use ($renderOptions): bool {
+                self::assertSame($renderOptions, $build->render_options);
+
+                return true;
+            }))
+            ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
+
+        $controller = self::controller($bus);
+        $response = $controller(self::request([...self::PAYLOAD, 'render_options' => $renderOptions]));
+
+        self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
+    }
+
+    /** An empty JSON object decodes to [], which ssg-library takes as "no options". */
+    public function testEnqueuesAnEmptyRenderOptionsObjectAsEmptyArray(): void
+    {
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(static function (BuildJob $build): bool {
+                self::assertSame([], $build->render_options);
+
+                return true;
+            }))
+            ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
+
+        $controller = self::controller($bus);
+        $response = $controller(self::request([...self::PAYLOAD, 'render_options' => new \stdClass()]));
+
+        self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
     }
 
     public function testReturns503WhenDispatchFails(): void
