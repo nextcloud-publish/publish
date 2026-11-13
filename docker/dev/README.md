@@ -2,8 +2,7 @@
 
 ```text
 compose.yaml             dev stack: publish, RabbitMQ, two ssg-workers, collectives-api-mock
-compose.nextcloud.yaml   joins nginx-fpm-gateway and ssg-worker to nextcloud-docker-dev's network
-.env.example             sample for .env: host ids, TZ, NEXTCLOUD_NETWORK
+.env.example             sample for .env: host ids, TZ
 collectives-api-mock/    nginx: content archives and status callbacks on :8082, published/ on :8081
 rabbitmq/                broker config and definitions for dev
 published/               published sites, written by ssg-worker

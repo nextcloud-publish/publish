@@ -32,6 +32,9 @@ cd publish
 cp docker/dev/.env.example docker/dev/.env
 sed -i -e "s/_UID=.*/_UID=$(id -u)/" -e "s/_GID=.*/_GID=$(id -g)/" docker/dev/.env
 
+# Shared with nextcloud-docker-dev, see Develop publish with nextcloud-docker-dev
+docker network create collectives-dev
+
 docker compose -f docker/dev/compose.yaml up --build
 ```
 

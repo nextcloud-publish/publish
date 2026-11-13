@@ -62,9 +62,9 @@ docker/
   rabbitmq/                   production broker config and definitions
   dev/Dockerfile              alpine + php85-fpm + dev dependencies, no source
   dev/README.md               the files in dev/, with links to the wiki
-  dev/compose.yaml            dev stack: nginx-fpm-gateway + publish + RabbitMQ + ssg-worker + mock
-  dev/compose.nextcloud.yaml  joins the dev stack to nextcloud-docker-dev
-  dev/.env.example            host ids, TZ and NEXTCLOUD_NETWORK; copy to dev/.env
+  dev/compose.yaml            dev stack: nginx-fpm-gateway + publish + RabbitMQ + ssg-worker + mock;
+                              joins the external network collectives-dev
+  dev/.env.example            host ids and TZ for the dev stack; copy to dev/.env
   dev/collectives-api-mock/   nginx: content archives and status callbacks on :8082, published/ on :8081
   dev/published/              bind mount the worker publishes into (gitignored)
   dev/build_temp/             bind mount for the worker's build scratch (gitignored)
