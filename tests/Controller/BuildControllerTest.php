@@ -188,7 +188,7 @@ final class BuildControllerTest extends WebTestCase
         return $out;
     }
 
-    /** Both fields become directory names in ssg-worker, so they are rejected here with a synchronous 400. */
+    /** Both fields become directory names in publish-worker, so they are rejected here with a synchronous 400. */
     #[DataProvider('provideUnsafeDirectoryNames')]
     public function testBuildRejectedOnAnUnsafeDirectoryName(string $field, string $value): void
     {
@@ -249,7 +249,7 @@ final class BuildControllerTest extends WebTestCase
         return $out;
     }
 
-    /** ssg-worker fetches and calls both URLs without checking them again, so they are rejected here with a synchronous 400. */
+    /** publish-worker fetches and calls both URLs without checking them again, so they are rejected here with a synchronous 400. */
     #[DataProvider('provideInvalidUrls')]
     public function testBuildRejectedOnAnInvalidUrl(string $field, mixed $value): void
     {

@@ -1,4 +1,4 @@
-What happens between a build request and a published site, and the rules publish and ssg-worker
+What happens between a build request and a published site, and the rules publish and publish-worker
 share.
 
 ## Overview
@@ -10,7 +10,7 @@ flowchart LR
     proxy -- "/" --> gateway["nginx-fpm-gateway (nginx)"]
     gateway --> publish["publish (PHP-FPM)"]
     publish --> rabbitmq[RabbitMQ]
-    rabbitmq --> worker["ssg-worker × n"]
+    rabbitmq --> worker["publish-worker × n"]
     worker -- "content download, status callback" --> nextcloud
     worker -- writes --> pages[("pages/")]
     proxy -- "/pages/" --> pages
@@ -22,7 +22,7 @@ flowchart LR
 | `nginx-fpm-gateway` | nginx container | Passes every request to PHP-FPM in `publish` over FastCGI |
 | `publish` | PHP-FPM container | Checks the bearer token and the request, puts a `BuildJob` on `q.builds`, answers `202` |
 | RabbitMQ | `rabbitmq:4` container | Holds `q.builds`, and the `delays` exchange for the worker's retry |
-| `ssg-worker` | PHP CLI containers, `SSG_WORKER_REPLICAS` of them, default 2 | Takes one job at a time: downloads, renders, swaps the site into `pages/`, calls back |
+| `publish-worker` | PHP CLI containers, `PUBLISH_WORKER_REPLICAS` of them, default 2 | Takes one job at a time: downloads, renders, swaps the site into `pages/`, calls back |
 
 ## Authentication
 
@@ -44,7 +44,7 @@ base64url all qualify.
 ## Validation
 
 publish checks every field of a build request; the
-[API reference](https://nextcloud-publish.github.io/publish/) lists the rules. ssg-worker does not
+[API reference](https://nextcloud-publish.github.io/publish/) lists the rules. publish-worker does not
 check them again and uses `static_site_id`, `slug` and `build_id` as directory names, so publish
 is the only check.
 
@@ -67,10 +67,10 @@ The body is JSON from Messenger's `symfony_serializer`; the class's property nam
 class name and `X-Message-Stamp-*` headers.
 
 `render_options` is any JSON value from the request, `null` when it is absent. publish and
-ssg-worker pass it on unchecked; ssg-library validates it and lists the
+publish-worker pass it on unchecked; ssg-library validates it and lists the
 [options](https://github.com/nextcloud-publish/ssg-library#render-options).
 
-ssg-worker decodes the body into its own `App\Message\BuildJob`, found by the `type` header. Both
+publish-worker decodes the body into its own `App\Message\BuildJob`, found by the `type` header. Both
 classes have the same namespace, name and properties. Every property except `render_options` is
 required, so they change together; a message that does not decode is dropped without a callback.
 
@@ -82,7 +82,7 @@ publish answers `202` only after the broker confirms the message.
 
 ## The build
 
-ssg-worker takes one message at a time: it downloads the archive, extracts it, renders the pages
+publish-worker takes one message at a time: it downloads the archive, extracts it, renders the pages
 with [ssg-library](https://github.com/nextcloud-publish/ssg-library), and swaps the site into
 `pages/<static_site_id>/<slug>/`. Then it PATCHes the outcome to `callback_status_url`.
 
@@ -96,5 +96,5 @@ The callback body is `{"status": "published", "data": {"publish_url": ...}}` or
 `{"status": "failed", "data": {"error_message": ...}}`. Delivery is at-least-once, so Nextcloud
 must treat a repeated status as one.
 
-[build-pipeline.md](https://github.com/nextcloud-publish/ssg-worker/blob/main/docs/build-pipeline.md)
-in ssg-worker describes the directories, the swap and the retries in detail.
+[build-pipeline.md](https://github.com/nextcloud-publish/publish-worker/blob/main/docs/build-pipeline.md)
+in publish-worker describes the directories, the swap and the retries in detail.

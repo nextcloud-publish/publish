@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The sample's Compose project is `publish`, and its nginx service `nginx-fpm-gateway`.
+The sample's Compose project is `publish`, its nginx service `nginx-fpm-gateway`, and the worker
+`publish-worker`, from the image `ghcr.io/nextcloud-publish/publish-worker`.
 
 Before updating, copy the new `compose.yaml` and stop the old project with
-`docker compose -p publish-fpm down`. RabbitMQ starts with a new, empty volume, so builds still
-waiting in `q.builds` are lost.
+`docker compose -p publish-fpm down`. In `.env`, rename `SSG_WORKER_IMAGE`, `SSG_WORKER_REPLICAS`
+and `SSG_WORKER_SENTRY_DSN` to `PUBLISH_WORKER_*`; unset, they fall back to their defaults. Rename
+`logs/ssg-worker/` to `logs/publish-worker/`, and point logrotate at `publish-worker.log` in it.
+RabbitMQ starts with a new, empty volume, so builds still waiting in `q.builds` are lost.
 
 ### Added
 
@@ -22,6 +25,9 @@ waiting in `q.builds` are lost.
 
 - `docker/compose.yaml`: the project `publish-fpm` is `publish`, and the service `web` is
   `nginx-fpm-gateway`, in the dev stack too.
+- ssg-worker is `publish-worker`: the compose service, the image, the `PUBLISH_WORKER_*` variables,
+  the log folder and the mounts under `/publish-worker`. The dev stack builds it from
+  `../publish-worker`, and `docker/dev/.env` takes `PUBLISH_WORKER_UID`/`PUBLISH_WORKER_GID`.
 
 ## [0.4.0] - 2026-11-11
 

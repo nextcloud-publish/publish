@@ -3,8 +3,8 @@ name: publish-dev
 # Full dev stack. Needs both repos cloned side by side:
 #
 #   <any dir>/
-#   ├── publish/      this repo, run compose from here
-#   └── ssg-worker/   built and mounted from ../../../ssg-worker
+#   ├── publish/          this repo, run compose from here
+#   └── publish-worker/   built and mounted from ../../../publish-worker
 #
 #   docker network create collectives-dev
 #   docker compose -f docker/dev/compose.yaml up --build
@@ -69,15 +69,15 @@ services:
       retries: 20
 
   # Consumes q.builds, renders the site into published/, reports via callback_status_url.
-  ssg-worker:
+  publish-worker:
     build:
-      context: ../../../ssg-worker
+      context: ../../../publish-worker
       dockerfile: docker/dev/Dockerfile
       pull: true
-    image: ssg-worker-dev
+    image: publish-worker-dev
     deploy:
       replicas: 2
-    user: "${SSG_WORKER_UID:-1000}:${SSG_WORKER_GID:-1000}"
+    user: "${PUBLISH_WORKER_UID:-1000}:${PUBLISH_WORKER_GID:-1000}"
     environment:
       TZ: "${TZ:-Europe/Berlin}"
       APP_ENV: dev
@@ -88,12 +88,12 @@ services:
       # Where collectives-api-mock serves ./published (:8081); publish_url is built from it.
       PUBLISH_BASE_URL: "http://127.0.0.1:8081"
     volumes:
-      - ../../../ssg-worker:/ssg-worker
+      - ../../../publish-worker:/publish-worker
       # Keeps the image's vendor/ visible under the mount above. A host-side
       # `composer require` needs a `docker compose build` to take effect.
-      - /ssg-worker/vendor
-      - ./build_temp:/ssg-worker/var/build_temp
-      - ./published:/ssg-worker/var/published
+      - /publish-worker/vendor
+      - ./build_temp:/publish-worker/var/build_temp
+      - ./published:/publish-worker/var/published
     depends_on:
       rabbitmq:
         condition: service_healthy

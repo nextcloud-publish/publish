@@ -4,7 +4,7 @@ framework:
         transports:
             builds:
                 # Same variable the whole stack already uses, and the same one
-                # ssg-worker reads -- deliberately not Flex's
+                # publish-worker reads -- deliberately not Flex's
                 # MESSENGER_TRANSPORT_DSN, so the compose files stay untouched
                 # and the two services cannot drift apart.
                 #

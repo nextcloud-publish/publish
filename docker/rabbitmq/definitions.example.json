@@ -1,6 +1,6 @@
 {
   "rabbit_version": "4.0.0",
-  "comment": "Topology for publish and ssg-worker; docker/dev/rabbitmq/README.md explains it. Copy to definitions.json; https://github.com/nextcloud-publish/publish/wiki/Deploy-publish fills in the hash.",
+  "comment": "Topology for publish and publish-worker; docker/dev/rabbitmq/README.md explains it. Copy to definitions.json; https://github.com/nextcloud-publish/publish/wiki/Deploy-publish fills in the hash.",
 
   "users": [
     {

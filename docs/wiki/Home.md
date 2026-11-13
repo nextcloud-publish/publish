@@ -3,18 +3,18 @@
 </p>
 
 Publish builds static websites from Nextcloud Collectives. Nextcloud sends a build request to the
-publish API; ssg-worker downloads the collective's content, renders the site into `pages/` and
+publish API; publish-worker downloads the collective's content, renders the site into `pages/` and
 reports the result back to Nextcloud.
 
 ## Technology
 
-- publish and ssg-worker run PHP 8.5 on Alpine.
+- publish and publish-worker run PHP 8.5 on Alpine.
 - Symfony 8.1. [Messenger](https://symfony.com/doc/current/messenger.html) sends the `BuildJob`
-  as JSON in publish and consumes it in ssg-worker.
+  as JSON in publish and consumes it in publish-worker.
 - [Monolog](https://symfony.com/doc/current/logging.html) writes the logs; errors go to Sentry or
   GlitchTip when a DSN is set.
 - RabbitMQ 4 as the broker. Its user, queue and exchanges come from `definitions.json`.
-- [ssg-library](https://github.com/nextcloud-publish/ssg-library) renders the site in ssg-worker.
+- [ssg-library](https://github.com/nextcloud-publish/ssg-library) renders the site in publish-worker.
 - Docker Compose runs everything; the images are in GHCR.
 
 ## Pages
@@ -54,7 +54,7 @@ docs/wiki/                    the wiki pages, pushed to the GitHub wiki from mai
 docker/
   README.md                   the files in docker/, with links to the wiki
   Dockerfile                  the image CI pushes: PHP-FPM with the app, no dev dependencies
-  compose.yaml                production sample: nginx-fpm-gateway + publish + RabbitMQ + ssg-worker
+  compose.yaml                production sample: nginx-fpm-gateway + publish + RabbitMQ + publish-worker
   .env.example                the sample's settings
   nginx/default.conf          passes every request to PHP-FPM; prod and dev
   php/php-fpm.conf            replaces the image's FPM config; prod and dev
@@ -62,7 +62,7 @@ docker/
   rabbitmq/                   production broker config and definitions
   dev/Dockerfile              alpine + php85-fpm + dev dependencies, no source
   dev/README.md               the files in dev/, with links to the wiki
-  dev/compose.yaml            dev stack: nginx-fpm-gateway + publish + RabbitMQ + ssg-worker + mock;
+  dev/compose.yaml            dev stack: nginx-fpm-gateway + publish + RabbitMQ + publish-worker + mock;
                               joins the external network collectives-dev
   dev/.env.example            host ids and TZ for the dev stack; copy to dev/.env
   dev/collectives-api-mock/   nginx: content archives and status callbacks on :8082, published/ on :8081

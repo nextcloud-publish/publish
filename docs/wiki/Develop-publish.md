@@ -1,5 +1,5 @@
 [`docker/dev/`](https://github.com/nextcloud-publish/publish/tree/main/docker/dev) holds a dev
-setup that runs publish, ssg-worker and a Nextcloud mock on one machine with Docker Compose. Both
+setup that runs publish, publish-worker and a Nextcloud mock on one machine with Docker Compose. Both
 repos are mounted into their containers, so code changes need no rebuild.
 
 `docker/dev/compose.yaml`, project `publish-dev`:
@@ -8,7 +8,7 @@ repos are mounted into their containers, so code changes need no rebuild.
 nginx-fpm-gateway      nginx on :8080, passes http request to publish over FastCGI
 publish                PHP-FPM, the API; sends each build to RabbitMQ
 rabbitmq               queue q.builds; AMQP on :5672, management UI on :15672
-ssg-worker x2          takes builds from q.builds, writes the sites to docker/dev/published/
+publish-worker x2      takes builds from q.builds, writes the sites to docker/dev/published/
 collectives-api-mock   nginx: content archives and status callbacks on :8082, published/ on :8081
 ```
 
@@ -18,17 +18,17 @@ Needs Docker with [Compose v2](https://docs.docker.com/compose/install/), and bo
 
 ```text
 publish-service/
-  publish/      this repo, run compose from here
-  ssg-worker/   built and mounted by docker/dev/compose.yaml
+  publish/          this repo, run compose from here
+  publish-worker/   built and mounted by docker/dev/compose.yaml
 ```
 
 ```bash
 mkdir publish-service && cd publish-service
 git clone https://github.com/nextcloud-publish/publish.git
-git clone https://github.com/nextcloud-publish/ssg-worker.git
+git clone https://github.com/nextcloud-publish/publish-worker.git
 cd publish
 
-# publish and ssg-worker run as your uid and gid, so they can write var/ in the checkouts
+# publish and publish-worker run as your uid and gid, so they can write var/ in the checkouts
 cp docker/dev/.env.example docker/dev/.env
 sed -i -e "s/_UID=.*/_UID=$(id -u)/" -e "s/_GID=.*/_GID=$(id -g)/" docker/dev/.env
 
@@ -42,7 +42,7 @@ All commands on this page run from `publish/`.
 
 ## Run a build
 
-Send publish the build request Collectives would send. ssg-worker then downloads a sample
+Send publish the build request Collectives would send. publish-worker then downloads a sample
 collective from `collectives-api-mock` and reports the build status back to it:
 
 ```bash
@@ -62,10 +62,10 @@ them, rebuild the mock with `docker compose -f docker/dev/compose.yaml up -d --b
 ## See the result
 
 ```bash
-# 200 once ssg-worker has published the site
+# 200 once publish-worker has published the site
 curl -I http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/
 
-# The status callback ssg-worker sent
+# The status callback publish-worker sent
 docker compose -f docker/dev/compose.yaml logs collectives-api-mock | grep CALLBACK
 
 # The published files
@@ -82,7 +82,7 @@ Open `http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/` in 
 `http://127.0.0.1:8081/` lists every published `static_site_id`.
 
 If the site or the callback doesn't show up, follow the build in the logs, see
-[Logs and debugging](#logs-and-debugging). ssg-worker adds `build_id`, `static_site_id`, `slug` and
+[Logs and debugging](#logs-and-debugging). publish-worker adds `build_id`, `static_site_id`, `slug` and
 `attempt` to every line it logs for a build, and publish logs the same ids with `Build enqueued`.
 
 ## With nextcloud-docker-dev
@@ -110,7 +110,7 @@ The commands below leave out `-f docker/dev/compose.yaml`.
 | You change | It takes effect |
 | --- | --- |
 | publish code or config | on the next request |
-| ssg-worker code or config | after `docker compose restart ssg-worker`; the worker is a long-running process |
+| publish-worker code or config | after `docker compose restart publish-worker`; the worker is a long-running process |
 | `composer.json` in either repo | after `docker compose up --build --renew-anon-volumes`; `vendor/` lives in the image |
 | `docker/nginx/default.conf` | after `docker compose restart nginx-fpm-gateway` |
 | `docker/dev/rabbitmq/` | after `docker compose restart rabbitmq`; it reads the files when it starts |
@@ -122,24 +122,24 @@ Both services log at `debug` in dev, to stderr and to a file in their checkout:
 
 ```bash
 # Follow both services
-docker compose -f docker/dev/compose.yaml logs -f publish ssg-worker
+docker compose -f docker/dev/compose.yaml logs -f publish publish-worker
 
 # Find a build's id by its static_site_id, then all its lines from both services
 grep '"static_site_id":"<static_site_id>"' var/log/publish.log
-grep -h '<build_id>' var/log/publish.log ../ssg-worker/var/log/ssg-worker.log
+grep -h '<build_id>' var/log/publish.log ../publish-worker/var/log/publish-worker.log
 
 # Jobs waiting in the queue
 docker compose -f docker/dev/compose.yaml exec rabbitmq rabbitmqctl list_queues name messages
 
 # A shell in a container, e.g. to run bin/console
 docker compose -f docker/dev/compose.yaml exec publish sh
-docker compose -f docker/dev/compose.yaml exec ssg-worker sh
+docker compose -f docker/dev/compose.yaml exec publish-worker sh
 ```
 
 | Service | File |
 | --- | --- |
 | publish | `var/log/publish.log` |
-| ssg-worker | `../ssg-worker/var/log/ssg-worker.log` |
+| publish-worker | `../publish-worker/var/log/publish-worker.log` |
 
 [Troubleshooting](https://github.com/nextcloud-publish/publish/wiki/Troubleshooting#log-messages)
 explains the log messages.

@@ -3,7 +3,7 @@ development setup in Docker, with Collectives from your own checkout and branch.
 
 With the publish [dev stack](https://github.com/nextcloud-publish/publish/wiki/Develop-publish)
 connected to it over a shared Docker network, you can run a full integration test: a build started in Collectives
-goes through publish and ssg-worker, and ssg-worker downloads the content from Nextcloud and reports
+goes through publish and publish-worker, and publish-worker downloads the content from Nextcloud and reports
 the build status back to it.
 
 `collectives-api-mock` still serves the published sites on `http://127.0.0.1:8081/`, as the host
@@ -17,7 +17,7 @@ Both stacks join the external network `collectives-dev`, created once with
 | nextcloud-docker-dev `nextcloud` | `nextcloud` | `http://publish.local:8080` for "Test connection" and builds |
 | nextcloud-docker-dev `proxy` | `nextcloud.local` | -- |
 | publish `nginx-fpm-gateway` | `publish.local` | -- |
-| publish `ssg-worker` | -- | `http://nextcloud.local` for the content archive and the status callback |
+| publish `publish-worker` | -- | `http://nextcloud.local` for the content archive and the status callback |
 
 ## 1. Setup nextcloud-docker-dev with collectives
 
@@ -82,7 +82,7 @@ Log in, then set the publish API in admin settings → Collectives → "Publish 
 | Static site generator URL | `http://publish.local:8080` |
 | Static site generator token | `dev-api-token-0123456789`, `PUBLISH_API_TOKEN` from `docker/dev/compose.yaml` |
 
-## 2. Setup publish and ssg-worker
+## 2. Setup publish and publish-worker
 
 Set up and start the dev stack as in
 [Develop publish](https://github.com/nextcloud-publish/publish/wiki/Develop-publish#setup). It joins
@@ -100,8 +100,8 @@ Use "Test connection" in the admin settings, then publish a collective from its 
 publish project, follow the build:
 
 ```bash
-docker compose -f docker/dev/compose.yaml logs -f publish ssg-worker
+docker compose -f docker/dev/compose.yaml logs -f publish publish-worker
 ```
 
 A successful build ends with `Published site` and `Reported build status {"status":"published"}`
-in the ssg-worker log.
+in the publish-worker log.

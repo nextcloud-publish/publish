@@ -3,9 +3,9 @@ openapi: 3.1.0
 info:
   title: publish API
   version: main
-  summary: Takes build requests for static sites and queues them for ssg-worker.
+  summary: Takes build requests for static sites and queues them for publish-worker.
   description: |
-    `POST /build` checks a build request and queues it. ssg-worker renders the site and reports
+    `POST /build` checks a build request and queues it. publish-worker renders the site and reports
     the outcome with a `PATCH` to the request's `callback_status_url`, described under the
     `buildStatus` callback of `POST /build`.
   license:
@@ -128,7 +128,7 @@ paths:
             patch:
               summary: Report the outcome of a build
               description: |
-                ssg-worker sends this once a build is published, or once it failed for good.
+                publish-worker sends this once a build is published, or once it failed for good.
                 Delivery is at-least-once: dedupe on `(callback_status_url, status)` and treat a
                 status as final.
               security: []
@@ -225,11 +225,11 @@ components:
           examples: [Some Collective]
         content_download_url:
           allOf: [$ref: '#/components/schemas/HttpUrl']
-          description: The Collectives export (`.tar.gz`) ssg-worker downloads.
+          description: The Collectives export (`.tar.gz`) publish-worker downloads.
           examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/content.tar.gz']
         callback_status_url:
           allOf: [$ref: '#/components/schemas/HttpUrl']
-          description: Where ssg-worker `PATCH`es the outcome; see the `buildStatus` callback.
+          description: Where publish-worker `PATCH`es the outcome; see the `buildStatus` callback.
           examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/status']
         render_options:
           description: |

@@ -55,10 +55,10 @@ services:
       retries: 20
     restart: unless-stopped
 
-  ssg-worker:
-    image: ${SSG_WORKER_IMAGE:-ghcr.io/nextcloud-publish/ssg-worker:latest}
+  publish-worker:
+    image: ${PUBLISH_WORKER_IMAGE:-ghcr.io/nextcloud-publish/publish-worker:latest}
     deploy:
-      replicas: ${SSG_WORKER_REPLICAS:-2}
+      replicas: ${PUBLISH_WORKER_REPLICAS:-2}
     environment:
       TZ: "${TZ:-Europe/Berlin}"
       AMQP_DSN: "amqp://publish:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}@rabbitmq:5672/%2f"
@@ -66,11 +66,11 @@ services:
       AMQP_HEARTBEAT: "60"
       PUBLISH_BASE_URL: "${PUBLISH_BASE_URL:?set PUBLISH_BASE_URL in .env}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
-      SENTRY_DSN: "${SSG_WORKER_SENTRY_DSN:-}"
+      SENTRY_DSN: "${PUBLISH_WORKER_SENTRY_DSN:-}"
     volumes:
-      - build-temp:/ssg-worker/var/build_temp
-      - ./pages:/ssg-worker/var/published
-      - ./logs/ssg-worker:/ssg-worker/var/log
+      - build-temp:/publish-worker/var/build_temp
+      - ./pages:/publish-worker/var/published
+      - ./logs/publish-worker:/publish-worker/var/log
     depends_on:
       rabbitmq:
         condition: service_healthy

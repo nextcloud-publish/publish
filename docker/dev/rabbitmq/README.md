@@ -12,7 +12,7 @@ The application does not declare topology itself, with one exception: [delay que
 
 | Object | Type | Purpose |
 | --- | --- | --- |
-| `q.builds` | quorum queue | pending builds, published by the API and consumed by ssg-worker |
+| `q.builds` | quorum queue | pending builds, published by the API and consumed by publish-worker |
 | `delays` | direct exchange | used by Symfony Messenger for delayed retries |
 
 `q.builds` has no exchange or binding of its own.
@@ -30,9 +30,9 @@ Check the management UI (http://127.0.0.1:15672) after a change.
 
 ## The delays exchange
 
-Symfony Messenger needs `delays` when a transport sets `retry_strategy.delay > 0`, as ssg-worker's `builds` transport does.
+Symfony Messenger needs `delays` when a transport sets `retry_strategy.delay > 0`, as publish-worker's `builds` transport does.
 
-ssg-worker runs with `auto_setup: false`, so `Connection::setupDelay()` does not declare the exchange, but it still declares its delay queues and binds them to it.
+publish-worker runs with `auto_setup: false`, so `Connection::setupDelay()` does not declare the exchange, but it still declares its delay queues and binds them to it.
 Without `delays` the bind fails with a 404 inside `Worker::ack()` and the consumer stops.
 
 Its type and flags must match what `getDelayExchange()` would declare: `direct` and `durable`.

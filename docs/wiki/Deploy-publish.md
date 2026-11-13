@@ -1,4 +1,4 @@
-Runs publish, RabbitMQ and ssg-worker with Docker Compose on one host, behind a reverse proxy on
+Runs publish, RabbitMQ and publish-worker with Docker Compose on one host, behind a reverse proxy on
 that host that terminates TLS.
 
 ## 0. Check the requirements
@@ -29,7 +29,7 @@ All later commands run in this folder.
 `pages/` holds the published sites, `logs/` the log files. Both app containers run as uid `10001`:
 
 ```bash
-mkdir -p pages logs/publish logs/ssg-worker
+mkdir -p pages logs/publish logs/publish-worker
 ```
 
 ```bash
@@ -131,7 +131,7 @@ server {
 nginx passes the `Authorization` header on unchanged; another proxy must do the same. A new route
 in publish needs a new entry in the endpoints `location`.
 
-The proxy's user must be able to read `pages/`. ssg-worker writes it with `0755` for
+The proxy's user must be able to read `pages/`. publish-worker writes it with `0755` for
 directories and `0644` for files.
 
 ## 5. Start the stack
@@ -179,7 +179,7 @@ nginx in `nginx-fpm-gateway` resolves `publish` only when it starts. When `up -d
 docker compose restart nginx-fpm-gateway
 ```
 
-To stay on one release instead of `latest`, set `PUBLISH_IMAGE` and `SSG_WORKER_IMAGE` in `.env`,
+To stay on one release instead of `latest`, set `PUBLISH_IMAGE` and `PUBLISH_WORKER_IMAGE` in `.env`,
 e.g. `ghcr.io/nextcloud-publish/publish:1.2.3`. Both images have these tags:
 
 | Tag | Points to |
