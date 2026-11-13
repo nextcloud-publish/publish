@@ -2,5 +2,6 @@
 - [How it works](https://github.com/nextcloud-publish/publish/wiki/How-it-works)
 - [Deploy publish](https://github.com/nextcloud-publish/publish/wiki/Deploy-publish)
 - [Troubleshooting](https://github.com/nextcloud-publish/publish/wiki/Troubleshooting)
-- [Development](https://github.com/nextcloud-publish/publish/wiki/Development)
+- [Develop publish](https://github.com/nextcloud-publish/publish/wiki/Develop-publish)
+- [Develop publish with nextcloud-docker-dev](https://github.com/nextcloud-publish/publish/wiki/Develop-publish-with-nextcloud-docker-dev)
 - [API reference](https://nextcloud-publish.github.io/publish/)

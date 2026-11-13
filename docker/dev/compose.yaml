@@ -11,7 +11,7 @@ name: publish-dev
 # Reads docker/dev/.env, created from .env.example, for host ids other than 1000.
 
 services:
-  web:
+  nginx-fpm-gateway:
     image: nginxinc/nginx-unprivileged:1.30-alpine
     environment:
       TZ: "${TZ:-Europe/Berlin}"
@@ -78,7 +78,7 @@ services:
       AMQP_DSN: "amqp://publish:secret@rabbitmq:5672/%2f"
       # Must match `heartbeat` in ./rabbitmq/rabbitmq.conf.
       AMQP_HEARTBEAT: "10"
-      # Where collectives-mock serves ./published (:8081); publish_url is built from it.
+      # Where collectives-api-mock serves ./published (:8081); publish_url is built from it.
       PUBLISH_BASE_URL: "http://127.0.0.1:8081"
     volumes:
       - ../../../ssg-worker:/ssg-worker
@@ -95,10 +95,10 @@ services:
 
   # Serves published sites read-only (:8081) and replaces the Collectives API (:8082):
   # content archives under /content/, status callbacks under /status/ logged to stdout.
-  collectives-mock:
+  collectives-api-mock:
     build:
-      context: ./collectives-mock
-    image: collectives-mock-dev
+      context: ./collectives-api-mock
+    image: collectives-api-mock-dev
     environment:
       TZ: "${TZ:-Europe/Berlin}"
     ports:
