@@ -38,6 +38,10 @@ composer install && npm ci && npm run build
 cd ../../../..
 ```
 
+`bootstrap.sh` clones the server's `master`. If its version is above `max-version` in the branch's
+`appinfo/info.xml`, Nextcloud doesn't enable Collectives on the first start, see
+[Troubleshooting](#troubleshooting).
+
 Add a `docker-compose.override.yml` and keep it out of `git status`. It joins `nextcloud` and
 `proxy` to `collectives-dev`, and lets the proxy also listen on `::1`: `nextcloud.local` resolves to
 `::1` first, and browsers don't fall back to `127.0.0.1`.
@@ -105,3 +109,11 @@ docker compose -f docker/dev/compose.yaml logs -f publish publish-worker
 
 A successful build ends with `Published site` and `Reported build status {"status":"published"}`
 in the publish-worker log.
+
+## Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| Collectives is missing in the UI; `docker compose logs nextcloud` shows `App "Collectives" cannot be installed because it is not compatible with this version of the server` | The server is newer than the branch's `max-version`. Enable it anyway: `docker compose exec nextcloud occ app:enable --force collectives` |
+| The browser can't connect to `http://nextcloud.local/` | The proxy doesn't listen on `::1`: check that `docker-compose.override.yml` exists and Compose runs without `-f` |
+| "Test connection" fails, or the health check in step 3 can't resolve `publish.local` | The publish dev stack isn't running: start it as in step 2. If nextcloud-docker-dev was running before the override existed, run `docker compose up -d nextcloud` again to join `collectives-dev` |

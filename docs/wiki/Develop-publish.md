@@ -75,7 +75,7 @@ ls -R docker/dev/pages/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/
 A successful build shows this callback:
 
 ```text
-CALLBACK PATCH /status/1234 -> 204 body={"status":"published","data":{"publish_url":"http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/"}}
+CALLBACK PATCH /status/1234 -> 204 body={"status":"published","data":{"publish_url":"http:\/\/127.0.0.1:8081\/11f5b798-6f34-4951-ad8b-bfd623ded5c2\/demo-site\/"}}
 ```
 
 Open `http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/` in a browser to see the site.
