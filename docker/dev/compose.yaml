@@ -68,7 +68,7 @@ services:
       timeout: 10s
       retries: 20
 
-  # Consumes q.builds, renders the site into published/, reports via callback_status_url.
+  # Consumes q.builds, renders the site into pages/, reports via callback_status_url.
   publish-worker:
     build:
       context: ../../../publish-worker
@@ -85,15 +85,19 @@ services:
       AMQP_DSN: "amqp://publish:secret@rabbitmq:5672/%2f"
       # Must match `heartbeat` in ./rabbitmq/rabbitmq.conf.
       AMQP_HEARTBEAT: "10"
-      # Where collectives-api-mock serves ./published (:8081); publish_url is built from it.
+      # Where collectives-api-mock serves ./pages (:8081); publish_url is built from it.
       PUBLISH_BASE_URL: "http://127.0.0.1:8081"
+      # Outside the checkout mounted at /publish-worker: mounted inside it, Docker would create
+      # var/ there as root on a fresh clone.
+      BUILDS_DIR: /builds
+      PAGES_DIR: /pages
     volumes:
       - ../../../publish-worker:/publish-worker
       # Keeps the image's vendor/ visible under the mount above. A host-side
       # `composer require` needs a `docker compose build` to take effect.
       - /publish-worker/vendor
-      - ./build_temp:/publish-worker/var/build_temp
-      - ./published:/publish-worker/var/published
+      - ./builds:/builds
+      - ./pages:/pages
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -116,7 +120,7 @@ services:
       - "127.0.0.1:8081:8081"
       - "127.0.0.1:8082:8082"
     volumes:
-      - ./published:/opt/ssg/published:ro
+      - ./pages:/srv/pages:ro
 
 volumes:
   rabbitmq-data:

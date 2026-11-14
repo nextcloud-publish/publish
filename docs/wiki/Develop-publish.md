@@ -8,8 +8,8 @@ repos are mounted into their containers, so code changes need no rebuild.
 nginx-fpm-gateway      nginx on :8080, passes http request to publish over FastCGI
 publish                PHP-FPM, the API; sends each build to RabbitMQ
 rabbitmq               queue q.builds; AMQP on :5672, management UI on :15672
-publish-worker x2      takes builds from q.builds, writes the sites to docker/dev/published/
-collectives-api-mock   nginx: content archives and status callbacks on :8082, published/ on :8081
+publish-worker x2      takes builds from q.builds, writes the sites to docker/dev/pages/
+collectives-api-mock   nginx: content archives and status callbacks on :8082, pages/ on :8081
 ```
 
 ## Setup
@@ -69,7 +69,7 @@ curl -I http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/
 docker compose -f docker/dev/compose.yaml logs collectives-api-mock | grep CALLBACK
 
 # The published files
-ls -R docker/dev/published/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/
+ls -R docker/dev/pages/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/
 ```
 
 A successful build shows this callback:
@@ -97,7 +97,7 @@ To build from Collectives in a local Nextcloud instead of `collectives-api-mock`
 | 8080 | the API, token `dev-api-token-0123456789` |
 | 5672 | RabbitMQ AMQP, for a worker running on the host |
 | 15672 | RabbitMQ management UI, `publish` / `secret` |
-| 8081 | the published sites, from `docker/dev/published/` |
+| 8081 | the published sites, from `docker/dev/pages/` |
 | 8082 | the Nextcloud mock: content archives under `/content/`, status callbacks under `/status/` |
 
 All ports are bound to `127.0.0.1`. All services run in the time zone `TZ`, default
@@ -147,7 +147,7 @@ explains the log messages.
 - `APP_DEBUG` is on, so an error in publish answers with Symfony's error page and stack trace.
 - The management UI on port 15672 shows whether a job is waiting on `q.builds`, and the
   `delays` exchange while a build waits for its retry.
-- `docker/dev/published/` holds the published sites, `docker/dev/build_temp/` a running build.
+- `docker/dev/pages/` holds the published sites, `docker/dev/builds/` a running build.
 
 ## PHPUnit
 

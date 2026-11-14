@@ -68,8 +68,8 @@ services:
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       SENTRY_DSN: "${PUBLISH_WORKER_SENTRY_DSN:-}"
     volumes:
-      - build-temp:/publish-worker/var/build_temp
-      - ./pages:/publish-worker/var/published
+      - builds:/publish-worker/var/builds
+      - ./pages:/publish-worker/var/pages
       - ./logs/publish-worker:/publish-worker/var/log
     depends_on:
       rabbitmq:
@@ -79,4 +79,4 @@ services:
 
 volumes:
   rabbitmq-data:
-  build-temp:
+  builds:

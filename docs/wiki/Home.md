@@ -65,8 +65,8 @@ docker/
   dev/compose.yaml            dev stack: nginx-fpm-gateway + publish + RabbitMQ + publish-worker + mock;
                               joins the external network collectives-dev
   dev/.env.example            host ids and TZ for the dev stack; copy to dev/.env
-  dev/collectives-api-mock/   nginx: content archives and status callbacks on :8082, published/ on :8081
-  dev/published/              bind mount the worker publishes into (gitignored)
-  dev/build_temp/             bind mount for the worker's build scratch (gitignored)
+  dev/collectives-api-mock/   nginx: content archives and status callbacks on :8082, pages/ on :8081
+  dev/pages/                  bind mount the worker publishes into (gitignored)
+  dev/builds/                 bind mount for the worker's build scratch (gitignored)
   dev/rabbitmq/               definitions.json (topology) + rabbitmq.conf
 ```

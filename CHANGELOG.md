@@ -14,7 +14,8 @@ Before updating, copy the new `compose.yaml` and stop the old project with
 `docker compose -p publish-fpm down`. In `.env`, rename `SSG_WORKER_IMAGE`, `SSG_WORKER_REPLICAS`
 and `SSG_WORKER_SENTRY_DSN` to `PUBLISH_WORKER_*`; unset, they fall back to their defaults. Rename
 `logs/ssg-worker/` to `logs/publish-worker/`, and point logrotate at `publish-worker.log` in it.
-RabbitMQ starts with a new, empty volume, so builds still waiting in `q.builds` are lost.
+RabbitMQ starts with a new, empty volume, so builds still waiting in `q.builds` are lost. The
+compose file needs the publish-worker release that reads `BUILDS_DIR` and `PAGES_DIR`.
 
 ### Added
 
@@ -28,6 +29,13 @@ RabbitMQ starts with a new, empty volume, so builds still waiting in `q.builds` 
 - ssg-worker is `publish-worker`: the compose service, the image, the `PUBLISH_WORKER_*` variables,
   the log folder and the mounts under `/publish-worker`. The dev stack builds it from
   `../publish-worker`, and `docker/dev/.env` takes `PUBLISH_WORKER_UID`/`PUBLISH_WORKER_GID`.
+- The worker's directories are `var/builds` and `var/pages`, the volume `build-temp` is `builds`; in
+  the dev stack `docker/dev/builds/` and `docker/dev/pages/`.
+
+### Fixed
+
+- The dev stack starts from a fresh publish-worker clone: the worker's directories are mounted
+  outside its checkout, so Docker no longer creates its `var/` as root.
 
 ## [0.4.0] - 2026-11-11
 
