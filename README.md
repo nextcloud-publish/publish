@@ -3,12 +3,12 @@
 </p>
 
 A Symfony 8.1 REST API service building static websites for Nextcloud Collectives.
-It receives build requests and puts them on RabbitMQ for `ssg-worker` to pick up.
+It receives build requests and puts them on RabbitMQ for `publish-worker` to pick up.
 
 ## Documentation
 
 The [wiki](https://github.com/nextcloud-publish/publish/wiki) covers both services,
-publish and ssg-worker. Its pages live in `docs/wiki/`; CI pushes them to the wiki on every push
+publish and publish-worker. Its pages live in `docs/wiki/`; CI pushes them to the wiki on every push
 to `main`.
 
 - [Home](https://github.com/nextcloud-publish/publish/wiki): what publish is, the technology and the layout of this repository.

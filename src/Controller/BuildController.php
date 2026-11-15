@@ -15,7 +15,7 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * Validates a build request and enqueues it as a BuildJob for ssg-worker.
+ * Validates a build request and enqueues it as a BuildJob for publish-worker.
  * The security firewall authenticates the request before this controller is resolved.
  *
  * @param MessageBusInterface $bus The bus that publishes the BuildJob to the `builds` transport.
@@ -30,7 +30,7 @@ final class BuildController
     }
 
     /**
-     * Allow-list for static_site_id and slug, which ssg-worker uses as directory names without checking them again.
+     * Allow-list for static_site_id and slug, which publish-worker uses as directory names without checking them again.
      * Dots are excluded, so `..` cannot pass.
      */
     private const SAFE_ID = '/^[A-Za-z0-9_-]{1,128}$/';

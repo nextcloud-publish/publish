@@ -1,12 +1,12 @@
 # docker/dev
 
 ```text
-compose.yaml             dev stack: publish, RabbitMQ, two ssg-workers, collectives-api-mock
+compose.yaml             dev stack: publish, RabbitMQ, two publish-workers, collectives-api-mock
 .env.example             sample for .env: host ids, TZ
-collectives-api-mock/    nginx: content archives and status callbacks on :8082, published/ on :8081
+collectives-api-mock/    nginx: content archives and status callbacks on :8082, pages/ on :8081
 rabbitmq/                broker config and definitions for dev
-published/               published sites, written by ssg-worker
-build_temp/              running builds
+pages/                   published sites, written by publish-worker
+builds/                  running builds
 ```
 
 - [Develop publish](../../docs/wiki/Develop-publish.md) runs the stack with `collectives-api-mock`.

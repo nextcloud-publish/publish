@@ -6,7 +6,9 @@
 /config/secrets/prod/prod.decrypt.private.php
 /public/bundles/
 /var/
-/vendor/
+# Kept as an empty directory so Docker does not create it as root for the dev stack's vendor volume.
+/vendor/*
+!/vendor/.gitkeep
 ###< symfony/framework-bundle ###
 
 ###> phpunit/phpunit ###

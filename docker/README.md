@@ -1,7 +1,7 @@
 # docker
 
 ```text
-compose.yaml   production sample: nginx, publish (PHP-FPM), RabbitMQ, ssg-worker
+compose.yaml   production sample: nginx, publish (PHP-FPM), RabbitMQ, publish-worker
 .env.example   settings for compose.yaml
 Dockerfile     the publish image, built from the repo root
 nginx/         nginx config, shared with the dev stack
