@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-15
+
 The sample's Compose project is `publish`, its nginx service `nginx-fpm-gateway`, and the worker
 `publish-worker`, from the image `ghcr.io/nextcloud-publish/publish-worker`.
 
@@ -15,7 +17,7 @@ Before updating, copy the new `compose.yaml` and stop the old project with
 and `SSG_WORKER_SENTRY_DSN` to `PUBLISH_WORKER_*`; unset, they fall back to their defaults. Rename
 `logs/ssg-worker/` to `logs/publish-worker/`, and point logrotate at `publish-worker.log` in it.
 RabbitMQ starts with a new, empty volume, so builds still waiting in `q.builds` are lost. The
-compose file needs the publish-worker release that reads `BUILDS_DIR` and `PAGES_DIR`.
+compose file needs publish-worker 0.6.0, which reads `BUILDS_DIR` and `PAGES_DIR`.
 
 ### Added
 
@@ -122,7 +124,8 @@ compose file needs the publish-worker release that reads `BUILDS_DIR` and `PAGES
   GHCR.
 - Pre-commit hooks that run the CI lint and test steps.
 
-[Unreleased]: https://github.com/nextcloud-publish/publish/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/nextcloud-publish/publish/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.5.0
 [0.4.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.4.0
 [0.3.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.3.0
 [0.2.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.2.0
