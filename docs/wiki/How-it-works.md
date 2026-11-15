@@ -7,8 +7,8 @@ share.
 flowchart LR
     nextcloud[Nextcloud] -- "POST /build" --> proxy[host proxy]
     visitors[visitors] -- "GET /pages/" --> proxy
-    proxy -- "/" --> web["web (nginx)"]
-    web --> publish["publish (PHP-FPM)"]
+    proxy -- "/" --> gateway["nginx-fpm-gateway (nginx)"]
+    gateway --> publish["publish (PHP-FPM)"]
     publish --> rabbitmq[RabbitMQ]
     rabbitmq --> worker["ssg-worker × n"]
     worker -- "content download, status callback" --> nextcloud
@@ -18,8 +18,8 @@ flowchart LR
 
 | Component | Runs as | Does |
 | --- | --- | --- |
-| host proxy | nginx or any proxy on the host | Terminates TLS. Forwards `/` to `web`, serves build pages via `/pages/` |
-| `web` | nginx container | Passes every request to PHP-FPM in `publish` over FastCGI |
+| host proxy | nginx or any proxy on the host | Terminates TLS. Forwards `/` to `nginx-fpm-gateway`, serves the published sites at `/pages/` |
+| `nginx-fpm-gateway` | nginx container | Passes every request to PHP-FPM in `publish` over FastCGI |
 | `publish` | PHP-FPM container | Checks the bearer token and the request, puts a `BuildJob` on `q.builds`, answers `202` |
 | RabbitMQ | `rabbitmq:4` container | Holds `q.builds`, and the `delays` exchange for the worker's retry |
 | `ssg-worker` | PHP CLI containers, `SSG_WORKER_REPLICAS` of them, default 2 | Takes one job at a time: downloads, renders, swaps the site into `pages/`, calls back |

@@ -7,10 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The sample's Compose project is `publish`, and its nginx service `nginx-fpm-gateway`.
+
+Before updating, copy the new `compose.yaml` and stop the old project with
+`docker compose -p publish-fpm down`. RabbitMQ starts with a new, empty volume, so builds still
+waiting in `q.builds` are lost.
+
 ### Added
 
 - A pushed version tag creates the GitHub release after the image, with the version's CHANGELOG
   section and the `docker pull` command as notes.
+
+### Changed
+
+- `docker/compose.yaml`: the project `publish-fpm` is `publish`, and the service `web` is
+  `nginx-fpm-gateway`, in the dev stack too.
 
 ## [0.4.0] - 2026-11-11
 

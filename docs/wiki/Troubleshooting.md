@@ -1,3 +1,8 @@
+The paths and commands are for a deployment from
+[Deploy publish](https://github.com/nextcloud-publish/publish/wiki/Deploy-publish). In the dev stack
+the log files are in `var/log/` of each checkout, see
+[Develop publish](https://github.com/nextcloud-publish/publish/wiki/Develop-publish#logs-and-debugging).
+
 ## Logs
 
 Both services write the same lines to a file and to stderr:
@@ -7,7 +12,7 @@ Both services write the same lines to a file and to stderr:
 | publish | `logs/publish/publish.log` | `docker compose logs publish` |
 | ssg-worker | `logs/ssg-worker/ssg-worker.log`, shared by the replicas | `docker compose logs ssg-worker` |
 
-The files are not rotated; rotate them on the host. `web` and `rabbitmq` log to stderr only.
+The files are not rotated; rotate them on the host. `nginx-fpm-gateway` and `rabbitmq` log to stderr only.
 
 ```text
 [2026-10-31T14:03:12.481920+00:00] app.INFO: Build enqueued {"build_id":"0199c3e2-…","static_site_id":"site-42","slug":"handbook"} {"hostname":"3f9a1c2b7d4e","uid":"a1b2c3d"}
@@ -34,14 +39,16 @@ Then all lines of that build, from both services:
 grep -h '<build_id>' logs/publish/publish.log logs/ssg-worker/ssg-worker.log
 ```
 
-A good build ends with `Published site` and `Reported build status`. A failed one retries once
+A successful build ends with `Published site` and `Reported build status`. A failed one retries once
 (`attempt` `2`), then ends with `Build failed`. `Build started` without either end means the worker
 was stopped during the build.
 
 ## Log messages
 
-publish, besides Symfony's own lines. Every line carries `hostname`, the container id, and `uid`,
-a random id per request:
+### publish
+
+Besides Symfony's own lines, publish logs these. Every line carries `hostname`, the container id,
+and `uid`, a random id per request:
 
 | Level     | Message                   | Context                                           | Answer |
 | --------- | ------------------------- | ------------------------------------------------- | ------ |
@@ -52,7 +59,9 @@ a random id per request:
 
 A request without a token, and the request body, are not logged.
 
-ssg-worker, besides Messenger's and HttpClient's lines. Every line of a build carries `build_id`,
+### ssg-worker
+
+Besides Messenger's and HttpClient's lines, ssg-worker logs these. Every line of a build carries `build_id`,
 `static_site_id`, `slug`, `attempt` (`1`, or `2` for the retry) and `hostname`:
 
 | Level     | Message                                     | Context                          |
@@ -88,6 +97,7 @@ a Sentry or GlitchTip project. Without them, nothing is sent.
 | Symptom | Log line | Fix |
 | --- | --- | --- |
 | Nextcloud gets `401` | publish: `Rejected API token` | Nextcloud's token must equal `PUBLISH_API_TOKEN` |
+| Nextcloud gets `502` after an update | none; nginx in `nginx-fpm-gateway` still has the old address of `publish` | `docker compose restart nginx-fpm-gateway` |
 | Nextcloud gets `503` | publish: `Could not enqueue build`; the exception names the cause | Check `docker compose ps`; for a refused login, hash `RABBITMQ_PASSWORD` into `rabbitmq/definitions.json` again |
 | A site is not published | ssg-worker: `Build failed`; the exception names the cause | e.g. Nextcloud refused the download |
 | Nextcloud never hears back | ssg-worker: `Could not report failed build` | ssg-worker must reach the `callback_status_url` Nextcloud sends |

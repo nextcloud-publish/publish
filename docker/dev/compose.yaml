@@ -6,12 +6,13 @@ name: publish-dev
 #   ├── publish/      this repo, run compose from here
 #   └── ssg-worker/   built and mounted from ../../../ssg-worker
 #
+#   docker network create collectives-dev
 #   docker compose -f docker/dev/compose.yaml up --build
 #
 # Reads docker/dev/.env, created from .env.example, for host ids other than 1000.
 
 services:
-  web:
+  nginx-fpm-gateway:
     image: nginxinc/nginx-unprivileged:1.30-alpine
     environment:
       TZ: "${TZ:-Europe/Berlin}"
@@ -21,6 +22,12 @@ services:
       - ../nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - publish
+    networks:
+      default:
+      # Nextcloud from nextcloud-docker-dev reaches the API at http://publish.local:8080.
+      collectives-dev:
+        aliases:
+          - publish.local
 
   publish:
     build:
@@ -78,7 +85,7 @@ services:
       AMQP_DSN: "amqp://publish:secret@rabbitmq:5672/%2f"
       # Must match `heartbeat` in ./rabbitmq/rabbitmq.conf.
       AMQP_HEARTBEAT: "10"
-      # Where collectives-mock serves ./published (:8081); publish_url is built from it.
+      # Where collectives-api-mock serves ./published (:8081); publish_url is built from it.
       PUBLISH_BASE_URL: "http://127.0.0.1:8081"
     volumes:
       - ../../../ssg-worker:/ssg-worker
@@ -92,13 +99,17 @@ services:
         condition: service_healthy
     # Mandatory: the image CMD passes --time-limit=3600, so the worker exits hourly.
     restart: unless-stopped
+    networks:
+      default:
+      # nextcloud.local is the nextcloud-docker-dev proxy on this network.
+      collectives-dev:
 
   # Serves published sites read-only (:8081) and replaces the Collectives API (:8082):
   # content archives under /content/, status callbacks under /status/ logged to stdout.
-  collectives-mock:
+  collectives-api-mock:
     build:
-      context: ./collectives-mock
-    image: collectives-mock-dev
+      context: ./collectives-api-mock
+    image: collectives-api-mock-dev
     environment:
       TZ: "${TZ:-Europe/Berlin}"
     ports:
@@ -109,3 +120,8 @@ services:
 
 volumes:
   rabbitmq-data:
+
+networks:
+  # Shared with nextcloud-docker-dev, created once: docker network create collectives-dev
+  collectives-dev:
+    external: true

@@ -1,6 +1,6 @@
 # Sample Collective
 
-This is the landing page of the fixture collective served by `collectives-mock`
+This is the landing page of the fixture collective served by `collectives-api-mock`
 in the dev stack. It stands in for a real Nextcloud Collectives export.
 
 A Collectives export is a directory tree:
@@ -18,5 +18,5 @@ These are plain markdown files in the repo; the `.tar.gz` is built inside the
 image. After changing anything here, run:
 
 ```sh
-docker compose build collectives-mock
+docker compose build collectives-api-mock
 ```

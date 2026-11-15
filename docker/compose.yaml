@@ -1,11 +1,11 @@
-name: publish-fpm
+name: publish
 
 # Production sample with PHP-FPM behind nginx, set up by
 # https://github.com/nextcloud-publish/publish/wiki/Deploy-publish
 # A reverse proxy on the host terminates TLS and forwards to 127.0.0.1:${PUBLISH_PORT}.
 
 services:
-  web:
+  nginx-fpm-gateway:
     image: nginxinc/nginx-unprivileged:1.30-alpine
     environment:
       TZ: "${TZ:-Europe/Berlin}"
