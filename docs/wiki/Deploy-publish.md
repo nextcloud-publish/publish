@@ -42,7 +42,7 @@ sudo chown -R 10001:10001 pages logs
 cp .env.example .env
 ```
 
-Set the three required values at the top. The comments in the file say how to generate them;
+Set the four required values at the top. The comments in the file say how to generate them;
 the optional values below them have their defaults.
 
 ## 3. Add the RabbitMQ user
@@ -140,7 +140,7 @@ directories and `0644` for files.
 docker compose up -d
 ```
 
-All services should be `running`, `nginx-fpm-gateway` and `rabbitmq` also `healthy`:
+All services should be `running`, `nginx-fpm-gateway`, `rabbitmq` and `postgres` also `healthy`:
 
 ```bash
 docker compose ps
@@ -171,6 +171,10 @@ docker compose pull
 ```bash
 docker compose up -d
 ```
+
+`publish` applies the database migrations of the new release when it starts; `docker compose logs
+publish` shows them. A failed migration stops the container, and `docker compose ps` shows it
+restarting.
 
 nginx in `nginx-fpm-gateway` resolves `publish` only when it starts. When `up -d` recreated `publish`, restart
 `nginx-fpm-gateway`, or the API answers `502`:

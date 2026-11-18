@@ -43,12 +43,36 @@ services:
       AMQP_DSN: "amqp://publish:secret@rabbitmq:5672/%2f"
       AMQP_HEARTBEAT: "10"
       PUBLISH_API_TOKEN: "dev-api-token-0123456789"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-publish}:secret@postgres:5432/publish?serverVersion=${POSTGRES_VERSION:-18}&charset=utf8"
     volumes:
       - ../..:/publish
       - /publish/vendor
     depends_on:
       rabbitmq:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-18}-alpine
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+      POSTGRES_USER: "${POSTGRES_USER:-publish}"
+      POSTGRES_DB: publish
+      POSTGRES_PASSWORD: secret
+    volumes:
+      # Postgres 18 and later images keep their data under /var/lib/postgresql/<major>/,
+      # so the volume goes on the parent directory, not on .../data.
+      - postgres-data:/var/lib/postgresql
+    # No published port on purpose: this database serves the publish container only.
+    # bin/console and the tests on the host use a Postgres on the host (see the wiki page
+    # Develop publish), which would collide with a published 5432.
+    healthcheck:
+      # Over TCP: during the first init the server listens only on its socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-publish} -d publish"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   rabbitmq:
     image: rabbitmq:4-management
@@ -124,6 +148,7 @@ services:
 
 volumes:
   rabbitmq-data:
+  postgres-data:
 
 networks:
   # Shared with nextcloud-docker-dev, created once: docker network create collectives-dev

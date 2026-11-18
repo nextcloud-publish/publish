@@ -6,7 +6,7 @@ FROM alpine:latest
 
 # openssl and zip are for composer.
 RUN apk add --no-cache \
-        php85 php85-fpm php85-pecl-amqp \
+        php85 php85-fpm php85-pecl-amqp php85-pdo php85-pdo_pgsql \
         php85-ctype php85-iconv php85-simplexml php85-xml \
         php85-dom php85-mbstring php85-tokenizer php85-xmlwriter \
         php85-curl php85-phar php85-openssl php85-zip \
@@ -16,6 +16,7 @@ ENV TZ=UTC \
     OPCACHE_VALIDATE_TIMESTAMPS=0
 COPY docker/php/php.ini /etc/php85/conf.d/99-publish.ini
 COPY docker/php/php-fpm.conf /etc/php85/php-fpm.conf
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/publish-entrypoint
 
 ARG UID=10001
 ARG GID=10001
@@ -41,4 +42,6 @@ RUN php bin/console cache:warmup
 
 EXPOSE 9000
 
+# Applies the pending database migrations, then starts php-fpm.
+ENTRYPOINT ["publish-entrypoint"]
 CMD ["php-fpm85", "--nodaemonize"]
