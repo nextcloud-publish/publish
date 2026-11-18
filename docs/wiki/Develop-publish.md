@@ -151,7 +151,8 @@ explains the log messages.
 
 ## Database
 
-publish uses Doctrine ORM on Postgres 18. Development has two databases:
+publish uses Doctrine ORM on Postgres. Its one table, `static_site`, is mapped by
+`src/Entity/StaticSite.php`. Development has two databases:
 
 - **In the dev stack:** the `postgres` container, user `publish`, password `secret`, database
   `publish`. Only the `publish` container reaches it; its port is not published on the host.
