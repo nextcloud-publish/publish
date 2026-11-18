@@ -4,35 +4,49 @@ declare(strict_types=1);
 
 namespace App\Tests\Controller;
 
+use App\Controller\StaticSiteController;
+use App\Entity\StaticSite;
+use App\Entity\StaticSiteStatus;
 use App\Message\BuildJob;
+use App\Tests\ResetsStaticSites;
+use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Handler\TestHandler;
 use Monolog\Level;
 use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Psr\Log\NullLogger;
+use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Exception\TransportException;
+use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * Covers App\Controller\BuildController through the kernel, including the security firewall.
+ * Covers App\Controller\StaticSiteController through the kernel, including the security firewall and the database.
  * The test kernel swaps the AMQP transport for in-memory://, so sent messages can be inspected.
+ * The client reboots the kernel before each further request, so the transport and the log only hold the last request's entries.
  */
-final class BuildControllerTest extends WebTestCase
+final class StaticSiteControllerTest extends WebTestCase
 {
+    use ResetsStaticSites;
+
     /** Matches PUBLISH_API_TOKEN in .env.test, which the test kernel boots with. */
     private const TOKEN = 'test-api-token-0123456789';
 
-    /** Server parameters carrying the bearer token POST /build requires. */
+    /** Server parameters carrying the bearer token POST /static-sites requires. */
     private const AUTH = ['HTTP_AUTHORIZATION' => 'Bearer ' . self::TOKEN];
 
     /** A complete, valid build request payload. */
     private const PAYLOAD = [
-        'static_site_id' => '1234-5678',
+        'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'build_id' => '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b',
         'slug' => 'some_collective',
         'title' => 'Some Collective',
-        'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-        'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+        'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
     ];
 
     /**
@@ -71,10 +85,22 @@ final class BuildControllerTest extends WebTestCase
         return array_values(array_filter(self::logged(), static fn (LogRecord $record): bool => $record->channel === 'app'));
     }
 
+    /**
+     * POSTs $fields to /static-sites under "data", as Collectives sends them.
+     *
+     * @param KernelBrowser $client The test client.
+     * @param array<mixed> $fields The fields of the static site.
+     * @param array<string, string> $server The server parameters, such as the Authorization header.
+     */
+    private static function postSite(KernelBrowser $client, array $fields, array $server = []): void
+    {
+        $client->jsonRequest('POST', '/static-sites', ['data' => $fields], $server);
+    }
+
     public function testBuildEnqueuedOnCompletePayload(): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', self::PAYLOAD, self::AUTH);
+        self::postSite($client, self::PAYLOAD, self::AUTH);
 
         // A 202 means every step of the auth chain granted access: header extractor,
         // ApiTokenHandler, api_clients provider, ROLE_API and the access_control rule.
@@ -96,8 +122,8 @@ final class BuildControllerTest extends WebTestCase
 
         $build = $sent[0]->getMessage();
         self::assertInstanceOf(BuildJob::class, $build);
-        self::assertTrue(Uuid::isValid($build->build_id));
-        self::assertSame('1234-5678', $build->static_site_id);
+        self::assertSame('0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b', $build->build_id, 'the build_id the client sent, not a new one');
+        self::assertSame('0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70', $build->static_site_id);
         self::assertSame('some_collective', $build->slug);
 
         self::assertSame('Some Collective', $build->title);
@@ -107,15 +133,240 @@ final class BuildControllerTest extends WebTestCase
         self::assertSame(Level::Info, $logged[0]->level);
         self::assertSame('Build enqueued', $logged[0]->message);
         self::assertSame(
-            ['build_id' => $build->build_id, 'static_site_id' => '1234-5678', 'slug' => 'some_collective'],
+            ['build_id' => $build->build_id, 'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70', 'slug' => 'some_collective'],
             $logged[0]->context,
         );
+    }
+
+    /**
+     * Returns the stored site with $id as the database holds it, or null.
+     *
+     * @param string $id The site's UUID.
+     * @return ?StaticSite the site
+     */
+    private static function storedSite(string $id): ?StaticSite
+    {
+        $entityManager = static::getContainer()->get(EntityManagerInterface::class);
+        // Drops what the identity map remembers, so find() reads the entry.
+        $entityManager->clear();
+
+        return $entityManager->find(StaticSite::class, Uuid::fromString($id));
+    }
+
+    /**
+     * Returns the BuildJob of the last request, failing unless exactly one was sent.
+     *
+     * @return BuildJob the job
+     */
+    private static function onlySentBuild(): BuildJob
+    {
+        $sent = self::sentToBuilds();
+        self::assertCount(1, $sent);
+        $build = $sent[0]->getMessage();
+        self::assertInstanceOf(BuildJob::class, $build);
+
+        return $build;
+    }
+
+    /**
+     * Fails unless the last answer is the 409 with $error and nothing was enqueued for it.
+     *
+     * @param KernelBrowser $client The test client.
+     * @param string $error The expected error.
+     * @return void
+     */
+    private static function assertConflict(KernelBrowser $client, string $error): void
+    {
+        self::assertResponseStatusCodeSame(409);
+        self::assertJsonStringEqualsJsonString(
+            (string) json_encode(['status' => 'conflict', 'error' => $error]),
+            (string) $client->getResponse()->getContent(),
+        );
+        self::assertCount(0, self::sentToBuilds(), 'a rejected request must not be enqueued');
+
+        $logged = self::appLogged();
+        self::assertCount(1, $logged);
+        self::assertSame(Level::Warning, $logged[0]->level);
+        self::assertSame('Build request rejected', $logged[0]->message);
+        self::assertSame($error, $logged[0]->context['reason']);
+    }
+
+    public function testACreatedSiteIsStoredWithItsFirstBuild(): void
+    {
+        $client = static::createClient();
+        self::postSite($client, self::PAYLOAD, self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+        $build = self::onlySentBuild();
+
+        $site = self::storedSite(self::PAYLOAD['static_site_id']);
+        self::assertNotNull($site);
+        self::assertSame('some_collective', $site->slug);
+        self::assertSame(StaticSiteStatus::Pending, $site->status);
+        self::assertNotNull($site->buildId);
+        self::assertSame($build->build_id, $site->buildId->toRfc4122());
+    }
+
+    /** The id is a primary key and a directory name, so one site must not arrive in two spellings. */
+    public function testAnUpperCaseIdIsStoredAndEnqueuedInLowerCase(): void
+    {
+        $client = static::createClient();
+        self::postSite($client, [
+            ...self::PAYLOAD,
+            'static_site_id' => strtoupper(self::PAYLOAD['static_site_id']),
+        ], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+        self::assertSame(self::PAYLOAD['static_site_id'], self::onlySentBuild()->static_site_id);
+        self::assertNotNull(self::storedSite(self::PAYLOAD['static_site_id']));
+    }
+
+    public function testANonUuidIdIsABadRequest(): void
+    {
+        $client = static::createClient();
+        self::postSite($client, [...self::PAYLOAD, 'static_site_id' => '1234-5678'], self::AUTH);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertJsonStringEqualsJsonString(
+            '{"status":"invalid","error":"static_site_id must be a UUID"}',
+            (string) $client->getResponse()->getContent(),
+        );
+        self::assertCount(0, self::sentToBuilds());
+    }
+
+    /**
+     * Provides build_id values that are not a UUIDv7, the version Collectives generates.
+     *
+     * @return array<string, array{string, mixed}> field name and invalid value, keyed by case name
+     */
+    public static function provideInvalidBuildIds(): array
+    {
+        return [
+            'build_id: not a UUID' => ['build_id', 'build-1'],
+            'build_id: a UUIDv4' => ['build_id', '4b6c1e2a-9d3f-4a7b-8c5e-2f1d0a9b8c7d'],
+            'build_id: not a string' => ['build_id', 42],
+        ];
+    }
+
+    #[DataProvider('provideInvalidBuildIds')]
+    public function testABuildIdThatIsNotAUuidV7IsABadRequest(string $field, mixed $value): void
+    {
+        $client = static::createClient();
+        self::postSite($client, [...self::PAYLOAD, $field => $value], self::AUTH);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertJsonStringEqualsJsonString(
+            '{"status":"invalid","error":"build_id must be a UUIDv7"}',
+            (string) $client->getResponse()->getContent(),
+        );
+        self::assertCount(0, self::sentToBuilds());
+    }
+
+    /** Collectives generates the build id; publish takes it as sent, in lower case like the site id. */
+    public function testTheClientsBuildIdIsStoredAndEnqueuedInLowerCase(): void
+    {
+        $client = static::createClient();
+        self::postSite($client, [...self::PAYLOAD, 'build_id' => strtoupper(self::PAYLOAD['build_id'])], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+        self::assertSame(self::PAYLOAD['build_id'], self::onlySentBuild()->build_id);
+        $site = self::storedSite(self::PAYLOAD['static_site_id']);
+        self::assertNotNull($site);
+        self::assertSame(self::PAYLOAD['build_id'], $site->buildId?->toRfc4122());
+    }
+
+    /**
+     * Provides bodies that do not carry the fields under "data".
+     *
+     * @return array<string, array{array<mixed>}> the request body, keyed by case name
+     */
+    public static function provideBodiesWithoutData(): array
+    {
+        return [
+            'fields at the top level' => [self::PAYLOAD],
+            'data is a string' => [['data' => 'not an object']],
+            'data is null' => [['data' => null]],
+        ];
+    }
+
+    /**
+     * @param array<mixed> $body The whole request body.
+     */
+    #[DataProvider('provideBodiesWithoutData')]
+    public function testFieldsOutsideDataAreMissing(array $body): void
+    {
+        $client = static::createClient();
+        $client->jsonRequest('POST', '/static-sites', $body, self::AUTH);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertJsonStringEqualsJsonString(
+            '{"status":"invalid","error":"missing required fields"}',
+            (string) $client->getResponse()->getContent(),
+        );
+        self::assertCount(0, self::sentToBuilds());
+    }
+
+    /** POST only creates: a second request for the same id changes nothing. */
+    public function testAnExistingIdIsAConflict(): void
+    {
+        $client = static::createClient();
+        self::postSite($client, self::PAYLOAD, self::AUTH);
+        self::assertResponseStatusCodeSame(202);
+        $firstBuild = self::onlySentBuild();
+
+        self::postSite($client, [...self::PAYLOAD, 'slug' => 'another_slug'], self::AUTH);
+
+        self::assertConflict($client, 'static site already exists');
+        $site = self::storedSite(self::PAYLOAD['static_site_id']);
+        self::assertNotNull($site);
+        self::assertSame('some_collective', $site->slug);
+        self::assertNotNull($site->buildId);
+        self::assertSame($firstBuild->build_id, $site->buildId->toRfc4122());
+    }
+
+    public function testASlugAnotherSiteHoldsIsAConflict(): void
+    {
+        $otherId = '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c71';
+
+        $client = static::createClient();
+        self::postSite($client, self::PAYLOAD, self::AUTH);
+        self::assertResponseStatusCodeSame(202);
+
+        self::postSite($client, [...self::PAYLOAD, 'static_site_id' => $otherId], self::AUTH);
+
+        self::assertConflict($client, 'slug already taken');
+        self::assertNull(self::storedSite($otherId));
+    }
+
+    /**
+     * The broker cannot fail in the test kernel, so the controller gets a bus that does, and the real entity manager.
+     * The insert must be rolled back: an entry left behind would answer the client's retry with a 409.
+     */
+    public function testAFailedDispatchLeavesNoRow(): void
+    {
+        self::bootKernel();
+        $entityManager = static::getContainer()->get(EntityManagerInterface::class);
+
+        $bus = $this->createStub(MessageBusInterface::class);
+        $bus->method('dispatch')->willThrowException(new TransportException('connection refused'));
+
+        $request = Request::create(
+            '/static-sites',
+            'POST',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['data' => self::PAYLOAD], JSON_THROW_ON_ERROR),
+        );
+        $response = (new StaticSiteController($bus, new NullLogger(), $entityManager))($request);
+
+        self::assertSame(503, $response->getStatusCode());
+        // Through the connection: a failed transaction closes the entity manager.
+        self::assertFalse($entityManager->getConnection()->fetchOne('SELECT 1 FROM static_site'));
     }
 
     public function testNoLogRecordCarriesARequestUrl(): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', self::PAYLOAD, self::AUTH);
+        self::postSite($client, self::PAYLOAD, self::AUTH);
 
         self::assertResponseStatusCodeSame(202);
 
@@ -129,7 +380,7 @@ final class BuildControllerTest extends WebTestCase
     public function testARejectedRequestLogsTheReason(): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', ['slug' => '../etc'] + self::PAYLOAD, self::AUTH);
+        self::postSite($client, ['slug' => '../etc'] + self::PAYLOAD, self::AUTH);
 
         self::assertResponseStatusCodeSame(400);
 
@@ -144,12 +395,13 @@ final class BuildControllerTest extends WebTestCase
     public function testATitleTravelsSeparatelyFromTheSlug(): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+        self::postSite($client, [
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'build_id' => '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b',
             'slug' => 'my-team-handbook',
             'title' => 'My Team Handbook',
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         ], self::AUTH);
 
         self::assertResponseStatusCodeSame(202);
@@ -193,12 +445,13 @@ final class BuildControllerTest extends WebTestCase
     public function testBuildRejectedOnAnUnsafeDirectoryName(string $field, string $value): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+        self::postSite($client, [
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'build_id' => '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b',
             'slug' => 'some_collective',
             'title' => 'Some Collective',
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
             $field => $value,
         ], self::AUTH);
 
@@ -212,12 +465,13 @@ final class BuildControllerTest extends WebTestCase
     public function testANonStringSlugIsABadRequestNotAServiceError(): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+        self::postSite($client, [
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'build_id' => '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b',
             'slug' => ['not', 'a', 'string'],
             'title' => 'Some Collective',
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         ], self::AUTH);
 
         self::assertResponseStatusCodeSame(400);
@@ -254,7 +508,7 @@ final class BuildControllerTest extends WebTestCase
     public function testBuildRejectedOnAnInvalidUrl(string $field, mixed $value): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', [...self::PAYLOAD, $field => $value], self::AUTH);
+        self::postSite($client, [...self::PAYLOAD, $field => $value], self::AUTH);
 
         self::assertResponseStatusCodeSame(400);
         self::assertStringContainsString($field, (string) $client->getResponse()->getContent());
@@ -264,7 +518,7 @@ final class BuildControllerTest extends WebTestCase
     public function testAPlainHttpUrlIsAccepted(): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', [
+        self::postSite($client, [
             ...self::PAYLOAD,
             'content_download_url' => 'http://example.org/content.tar.gz',
             'callback_status_url' => 'http://example.org/status',
@@ -292,12 +546,13 @@ final class BuildControllerTest extends WebTestCase
     public function testBuildRejectedOnAnInvalidTitle(mixed $title): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+        self::postSite($client, [
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'build_id' => '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b',
             'slug' => 'some_collective',
             'title' => $title,
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         ], self::AUTH);
 
         self::assertResponseStatusCodeSame(400);
@@ -308,11 +563,12 @@ final class BuildControllerTest extends WebTestCase
     public function testBuildRejectedOnAMissingTitle(): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', [
-            'static_site_id' => '1234-5678',
+        self::postSite($client, [
+            'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'build_id' => '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b',
             'slug' => 'some_collective',
-            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
-            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/1234-5678',
+            'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+            'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         ], self::AUTH);
 
         self::assertResponseStatusCodeSame(400);
@@ -328,7 +584,7 @@ final class BuildControllerTest extends WebTestCase
         unset($payload['slug']);
 
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', $payload, self::AUTH);
+        self::postSite($client, $payload, self::AUTH);
 
         self::assertResponseStatusCodeSame(400);
         self::assertResponseHeaderSame('content-type', 'application/json');
@@ -366,7 +622,7 @@ final class BuildControllerTest extends WebTestCase
 
         // The payload is otherwise valid, so the 401 is what stopped it.
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', self::PAYLOAD, $server);
+        self::postSite($client, self::PAYLOAD, $server);
 
         self::assertResponseStatusCodeSame(401);
         self::assertSame($challenge, $client->getResponse()->headers->get('WWW-Authenticate'));
@@ -377,7 +633,7 @@ final class BuildControllerTest extends WebTestCase
     public function testAWrongTokenIsLoggedWithTheClientAddress(): void
     {
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', self::PAYLOAD, [
+        self::postSite($client, self::PAYLOAD, [
             'HTTP_AUTHORIZATION' => 'Bearer ' . str_repeat('x', strlen(self::TOKEN)),
             'REMOTE_ADDR' => '203.0.113.7',
         ]);
@@ -395,7 +651,7 @@ final class BuildControllerTest extends WebTestCase
     {
         // No token reaches an authenticator, so there is no failure to log.
         $client = static::createClient();
-        $client->jsonRequest('POST', '/build', self::PAYLOAD);
+        self::postSite($client, self::PAYLOAD);
 
         self::assertResponseStatusCodeSame(401);
         self::assertSame([], self::appLogged());
@@ -408,7 +664,7 @@ final class BuildControllerTest extends WebTestCase
         $client = static::createClient();
         $client->request(
             'POST',
-            '/build',
+            '/static-sites',
             server: ['CONTENT_TYPE' => 'application/json'],
             content: 'not json at all',
         );
@@ -422,7 +678,7 @@ final class BuildControllerTest extends WebTestCase
         $client = static::createClient();
         $client->request(
             'POST',
-            '/build',
+            '/static-sites',
             server: ['CONTENT_TYPE' => 'application/json', ...self::AUTH],
             content: 'not json at all',
         );

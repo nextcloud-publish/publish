@@ -38,11 +38,11 @@ config/
   services.yaml               binds PUBLISH_API_TOKEN into ApiTokenHandler
 public/index.php              front controller
 src/
-  Controller/                 HealthController, BuildController
+  Controller/                 HealthController, StaticSiteController
   Security/ApiTokenHandler.php  compares the token, yields the API identity
   Security/RejectedTokenLogger.php  logs a rejected token with the client IP
   Message/BuildJob.php        the message shape for q.builds
-tests/Controller/             HealthControllerTest, BuildControllerTest, BuildEnqueueTest
+tests/Controller/             HealthControllerTest, StaticSiteControllerTest, StaticSiteEnqueueTest
 tests/Security/               ApiTokenHandlerTest
 tests/OpenApiTest.php         checks the app's answers against openapi.yaml
 openapi.yaml                  the API spec, OpenAPI 3.1

@@ -10,6 +10,12 @@ namespace App\Entity;
  */
 enum StaticSiteStatus: string
 {
-    case Created = 'created';
-    case Updated = 'updated';
+    /** A build is queued; the site is not published yet. */
+    case Pending = 'pending';
+
+    /** publish-worker published the site. */
+    case Published = 'published';
+
+    /** The last build failed for good; publish-worker reported it as failed. */
+    case Failed = 'failed';
 }

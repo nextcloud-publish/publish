@@ -14,12 +14,15 @@ use Symfony\Component\Uid\Uuid;
  */
 #[ORM\Entity]
 #[ORM\Table(name: 'static_site')]
-#[ORM\UniqueConstraint(name: 'uniq_static_site_slug', columns: ['slug'])]
+#[ORM\UniqueConstraint(name: self::SLUG_CONSTRAINT, columns: ['slug'])]
 final class StaticSite
 {
+    /** Name of the unique constraint on slug; Postgres names it in the message of a violation. */
+    public const SLUG_CONSTRAINT = 'uniq_static_site_slug';
+
     /**
      * @param Uuid $id Identifies the site; chosen by the client, which calls it static_site_id.
-     * @param string $slug The site's unique name, at most as long as BuildController's SAFE_ID allows.
+     * @param string $slug The site's unique name, at most as long as StaticSiteController's SAFE_ID allows.
      * @param StaticSiteStatus $status The site's state.
      * @param ?Uuid $buildId The most recently enqueued build, null before the first one.
      */

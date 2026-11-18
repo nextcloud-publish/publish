@@ -8,6 +8,7 @@ use App\Entity\StaticSite;
 use App\Entity\StaticSiteStatus;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Uid\Uuid;
 
@@ -25,11 +26,27 @@ final class StaticSiteTest extends KernelTestCase
         $this->entityManager->getConnection()->executeStatement('TRUNCATE static_site');
     }
 
-    public function testASiteReadsBackAsStored(): void
+    /**
+     * Provides every status, so a new one that does not fit the column fails here.
+     *
+     * @return array<string, array{StaticSiteStatus}> the status, keyed by its value
+     */
+    public static function provideStatuses(): array
+    {
+        $statuses = [];
+        foreach (StaticSiteStatus::cases() as $status) {
+            $statuses[$status->value] = [$status];
+        }
+
+        return $statuses;
+    }
+
+    #[DataProvider('provideStatuses')]
+    public function testASiteReadsBackAsStored(StaticSiteStatus $status): void
     {
         $id = Uuid::v7();
         $buildId = Uuid::v7();
-        $this->entityManager->persist(new StaticSite($id, 'some_collective', StaticSiteStatus::Updated, $buildId));
+        $this->entityManager->persist(new StaticSite($id, 'some_collective', $status, $buildId));
         $this->entityManager->flush();
         // Drops the identity map, so find() reads the entry back from the database.
         $this->entityManager->clear();
@@ -39,7 +56,7 @@ final class StaticSiteTest extends KernelTestCase
         self::assertInstanceOf(StaticSite::class, $site);
         self::assertTrue($id->equals($site->id));
         self::assertSame('some_collective', $site->slug);
-        self::assertSame(StaticSiteStatus::Updated, $site->status);
+        self::assertSame($status, $site->status);
         self::assertNotNull($site->buildId);
         self::assertTrue($buildId->equals($site->buildId));
     }
@@ -47,7 +64,7 @@ final class StaticSiteTest extends KernelTestCase
     public function testABuildIdIsOptional(): void
     {
         $id = Uuid::v7();
-        $this->entityManager->persist(new StaticSite($id, 'some_collective', StaticSiteStatus::Created));
+        $this->entityManager->persist(new StaticSite($id, 'some_collective', StaticSiteStatus::Pending));
         $this->entityManager->flush();
         $this->entityManager->clear();
 
@@ -60,10 +77,10 @@ final class StaticSiteTest extends KernelTestCase
     /** The constraint must exist in the database, not just in the mapping. */
     public function testTwoSitesCannotShareASlug(): void
     {
-        $this->entityManager->persist(new StaticSite(Uuid::v7(), 'some_collective', StaticSiteStatus::Created));
+        $this->entityManager->persist(new StaticSite(Uuid::v7(), 'some_collective', StaticSiteStatus::Pending));
         $this->entityManager->flush();
 
-        $this->entityManager->persist(new StaticSite(Uuid::v7(), 'some_collective', StaticSiteStatus::Created));
+        $this->entityManager->persist(new StaticSite(Uuid::v7(), 'some_collective', StaticSiteStatus::Pending));
 
         $this->expectException(UniqueConstraintViolationException::class);
         $this->entityManager->flush();
