@@ -17,6 +17,9 @@ Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.en
 - The `publish` container applies pending database migrations when it starts.
 - The `static_site` table, created by the first migration: one entry per site with its id, a
   unique slug, a status and the id of its last build.
+- `publish-worker` gets `DATABASE_URL` in `docker/compose.yaml` and waits for `postgres`: it
+  sets `static_site.status` to `published` after a build, or removes the published site and
+  deletes the entry when the build fails for good. Needs a publish-worker release that reads it.
 
 ### Changed
 
