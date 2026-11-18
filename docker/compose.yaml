@@ -89,12 +89,16 @@ services:
       PUBLISH_BASE_URL: "${PUBLISH_BASE_URL:?set PUBLISH_BASE_URL in .env}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       SENTRY_DSN: "${PUBLISH_WORKER_SENTRY_DSN:-}"
+      # The same database as publish: the worker sets static_site.status after a build.
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-publish}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/publish?serverVersion=${POSTGRES_VERSION:-18}&charset=utf8"
     volumes:
       - builds:/publish-worker/var/builds
       - ./pages:/publish-worker/var/pages
       - ./logs/publish-worker:/publish-worker/var/log
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     # Required: the image's CMD exits the worker after an hour (--time-limit=3600).
     restart: unless-stopped

@@ -115,6 +115,8 @@ services:
       # var/ there as root on a fresh clone.
       BUILDS_DIR: /builds
       PAGES_DIR: /pages
+      # The same database as publish: the worker sets static_site.status after a build.
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-publish}:secret@postgres:5432/publish?serverVersion=${POSTGRES_VERSION:-18}&charset=utf8"
     volumes:
       - ../../../publish-worker:/publish-worker
       # Keeps the image's vendor/ visible under the mount above. A host-side
@@ -124,6 +126,8 @@ services:
       - ./pages:/pages
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     # Mandatory: the image CMD passes --time-limit=3600, so the worker exits hourly.
     restart: unless-stopped
