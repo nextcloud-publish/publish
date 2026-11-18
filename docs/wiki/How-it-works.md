@@ -5,7 +5,7 @@ share.
 
 ```mermaid
 flowchart LR
-    nextcloud[Nextcloud] -- "POST /build" --> proxy[host proxy]
+    nextcloud[Nextcloud] -- "POST /static-sites" --> proxy[host proxy]
     visitors[visitors] -- "GET /pages/" --> proxy
     proxy -- "/" --> gateway["nginx-fpm-gateway (nginx)"]
     gateway --> publish["publish (PHP-FPM)"]
@@ -26,7 +26,7 @@ flowchart LR
 
 ## Authentication
 
-`POST /build` requires `Authorization: Bearer <PUBLISH_API_TOKEN>`. The scheme is case-sensitive,
+`POST /static-sites` requires `Authorization: Bearer <PUBLISH_API_TOKEN>`. The scheme is case-sensitive,
 and the token may contain `A-Z a-z 0-9 - _ + ~ / .` with optional trailing `=`; hex, base64 and
 base64url all qualify.
 
@@ -50,7 +50,13 @@ is the only check.
 
 ## The build message
 
-`BuildController` dispatches an `App\Message\BuildJob` through
+`POST /static-sites` only creates. The fields travel under `data`, and Collectives generates both
+ids: `static_site_id` (a UUID) and `build_id` (a UUIDv7). `StaticSiteController` answers `409` when
+the `static_site_id` is already stored or another site holds the `slug`. Otherwise it stores the
+site in `static_site` (status `pending`, the client's `build_id`) and dispatches its build in one
+database transaction, so a failed dispatch leaves no entry behind.
+
+`StaticSiteController` dispatches an `App\Message\BuildJob` through
 [Symfony Messenger](https://symfony.com/doc/current/messenger.html).
 `config/packages/messenger.yaml` routes it to the `builds` transport, which publishes it to the
 default exchange with `q.builds` as the routing key. publish has no handler for it.
@@ -88,13 +94,18 @@ with [ssg-library](https://github.com/nextcloud-publish/ssg-library), and swaps 
 
 | Outcome | What happens |
 | --- | --- |
-| Success | the site goes live, `published` with the `publish_url` is reported |
-| Transient failure | retried once after 15s through the `delays` exchange; a second failure reports `failed` |
-| Permanent failure | reported `failed` at once: an archive without a Markdown page, invalid `render_options`, or a callback answered with a 3xx or a 4xx other than 408 and 429 |
+| Success | the site goes live, `static_site.status` becomes `published`, and `published` with the `publish_url` is reported |
+| Transient failure | retried once after 15s through the `delays` exchange; a second failure removes the site and its entry, then reports `failed` |
+| Permanent failure | the site and its entry are removed and `failed` is reported at once: an archive without a Markdown page, invalid `render_options`, or a callback answered with a 3xx or a 4xx other than 408 and 429 |
 
 The callback body is `{"status": "published", "data": {"publish_url": ...}}` or
 `{"status": "failed", "data": {"error_message": ...}}`. Delivery is at-least-once, so Nextcloud
 must treat a repeated status as one.
+
+A failed build leaves nothing behind: the published site and the `static_site` entry are removed
+before `failed` is reported, so Collectives can POST the site again with a new `build_id`. Only
+when publish-worker cannot reach the database does the entry stay; the next POST then gets a
+`409` until an operator removes it.
 
 [build-pipeline.md](https://github.com/nextcloud-publish/publish-worker/blob/main/docs/build-pipeline.md)
 in publish-worker describes the directories, the swap and the retries in detail.

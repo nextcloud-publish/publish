@@ -3,11 +3,11 @@ openapi: 3.1.0
 info:
   title: publish API
   version: main
-  summary: Takes build requests for static sites and queues them for publish-worker.
+  summary: Stores static sites and queues their builds for publish-worker.
   description: |
-    `POST /build` checks a build request and queues it. publish-worker renders the site and reports
-    the outcome with a `PATCH` to the request's `callback_status_url`, described under the
-    `buildStatus` callback of `POST /build`.
+    `POST /static-sites` creates a static site and queues its first build. publish-worker renders
+    the site and reports the outcome with a `PATCH` to the request's `callback_status_url`, described
+    under the `buildStatus` callback of `POST /static-sites`.
   license:
     name: AGPL-3.0-or-later
     identifier: AGPL-3.0-or-later
@@ -17,8 +17,8 @@ servers:
     description: A deployment; every operator runs their own.
 
 tags:
-  - name: Builds
-    description: Build requests and the status callback.
+  - name: Static sites
+    description: Static sites, their builds and the status callback.
   - name: Health
     description: |
       `/health` is for container healthchecks and uptime monitoring, without a token.
@@ -72,20 +72,25 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /build:
+  /static-sites:
     post:
-      tags: [Builds]
-      operationId: createBuild
-      summary: Queue a build
+      tags: [Static sites]
+      operationId: createStaticSite
+      summary: Create a static site and queue its first build
       description: |
-        Answers `202` only after the broker confirms the message.
-        Fields other than the six below are ignored.
+        Stores the site and answers `202` only after the broker confirms the build. Only creates:
+        an id or a slug that is already stored is a `409`, and nothing is stored or queued.
+        The fields travel under `data`; other fields, inside or outside it, are ignored.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BuildRequest'
+              type: object
+              required: [data]
+              properties:
+                data:
+                  $ref: '#/components/schemas/StaticSiteRequest'
       responses:
         '202':
           description: Queued.
@@ -110,8 +115,18 @@ paths:
             text/html: {}
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: |
+            A site with this `static_site_id` is already stored, or another site holds the `slug`.
+            Nothing was stored or queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conflict'
         '503':
-          description: The broker could not be reached or did not confirm the message. Nothing was queued.
+          description: |
+            The broker could not be reached or did not confirm the message. Nothing was stored or
+            queued.
           content:
             application/json:
               schema:
@@ -124,13 +139,18 @@ paths:
                     enum: ['could not enqueue build']
       callbacks:
         buildStatus:
-          '{$request.body#/callback_status_url}':
+          '{$request.body#/data/callback_status_url}':
             patch:
               summary: Report the outcome of a build
               description: |
                 publish-worker sends this once a build is published, or once it failed for good.
                 Delivery is at-least-once: dedupe on `(callback_status_url, status)` and treat a
                 status as final.
+
+                Before `failed` is sent, the build leaves nothing behind: its published site and its
+                `static_site` entry are removed. The client can POST the site again, with a new
+                `build_id`. Only if publish-worker cannot reach the database does the entry stay;
+                the new POST then gets a `409` until an operator removes it.
               security: []
               parameters:
                 - name: OCS-APIRequest
@@ -205,17 +225,31 @@ components:
       pattern: '^[Hh][Tt][Tt][Pp][Ss]?://[^/?#]+'
       description: An `http` or `https` URL with a host.
 
-    BuildRequest:
+    StaticSiteRequest:
       type: object
-      required: [static_site_id, slug, title, content_download_url, callback_status_url]
+      required: [static_site_id, build_id, slug, title, content_download_url, callback_status_url]
       properties:
         static_site_id:
-          allOf: [$ref: '#/components/schemas/SafeId']
-          description: The site's directory under the published root.
-          examples: ['1234-5678']
+          type: string
+          format: uuid
+          pattern: '^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$'
+          description: |
+            Identifies the site; chosen by the client. Stored and used in lower case, and the site's
+            directory under the published root.
+          examples: ['0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70']
+        build_id:
+          type: string
+          format: uuid
+          pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-7[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$'
+          description: |
+            Identifies this build; a UUIDv7 chosen by the client. Stored as the site's last build and
+            used in lower case, also as the build's directory in publish-worker.
+          examples: ['0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b']
         slug:
           allOf: [$ref: '#/components/schemas/SafeId']
-          description: The directory the site is published under, inside `static_site_id`.
+          description: |
+            The directory the site is published under, inside `static_site_id`. Unique across all
+            sites.
           examples: [some_collective]
         title:
           type: string
@@ -226,11 +260,11 @@ components:
         content_download_url:
           allOf: [$ref: '#/components/schemas/HttpUrl']
           description: The Collectives export (`.tar.gz`) publish-worker downloads.
-          examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/content.tar.gz']
+          examples: ['https://cloud.example.org/apps/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70/content.tar.gz']
         callback_status_url:
           allOf: [$ref: '#/components/schemas/HttpUrl']
           description: Where publish-worker `PATCH`es the outcome; see the `buildStatus` callback.
-          examples: ['https://cloud.example.org/apps/collectives/publish/1234-5678/status']
+          examples: ['https://cloud.example.org/apps/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70/status']
         render_options:
           description: |
             Any JSON value, passed unchecked to ssg-library, which validates it; see its
@@ -248,6 +282,15 @@ components:
           type: string
           description: Which check failed.
           examples: ['slug must match [A-Za-z0-9_-]{1,128}']
+
+    Conflict:
+      type: object
+      required: [status, error]
+      properties:
+        status:
+          enum: ['conflict']
+        error:
+          enum: ['static site already exists', 'slug already taken']
 
     Problem:
       type: object
@@ -276,7 +319,7 @@ components:
             publish_url:
               type: string
               format: uri
-              examples: ['https://sites.example.org/1234-5678/some_collective/']
+              examples: ['https://sites.example.org/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70/some_collective/']
 
     BuildFailed:
       type: object

@@ -16,7 +16,19 @@ Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.en
   and `POSTGRES_VERSION` in `.env` set its user and major version.
 - The `publish` container applies pending database migrations when it starts.
 - The `static_site` table, created by the first migration: one entry per site with its id, a
-  unique slug, a status and the id of its last build. Nothing writes to it yet.
+  unique slug, a status and the id of its last build.
+
+### Changed
+
+- **Breaking:** `POST /build` becomes `POST /static-sites` and creates the site: it stores a
+  `static_site` entry (status `pending`, the id of the queued build) together with enqueueing the
+  build, and answers `409` when the `static_site_id` is already stored or another site holds the
+  `slug`. A failed enqueue stores nothing. A host nginx that lists the endpoints needs
+  `/static-sites` instead of `/build`, as `Deploy-publish` in the wiki shows.
+- **Breaking:** the fields of `POST /static-sites` travel under `data`, as `{"data": {...}}`.
+- **Breaking:** `static_site_id` must be a UUID, `400` otherwise. The client also sends the
+  `build_id`, a UUIDv7, `400` otherwise; publish no longer generates it. Both are stored and
+  enqueued in lower case.
 
 ## [0.5.0] - 2026-11-15
 

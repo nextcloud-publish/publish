@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Controller;
 
-use App\Controller\BuildController;
+use App\Controller\StaticSiteController;
 use App\Message\BuildJob;
+use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Handler\TestHandler;
 use Monolog\Level;
 use Monolog\Logger;
@@ -20,17 +21,18 @@ use Symfony\Component\Uid\Uuid;
 use Symfony\Component\Uid\UuidV7;
 
 /**
- * Covers the dispatch path of App\Controller\BuildController without a kernel.
+ * Covers the dispatch path of App\Controller\StaticSiteController without a kernel or a database.
  * The controller does not extend AbstractController, so it is constructed directly with a mocked bus.
- * A directly constructed controller never passes the security firewall, so the 401 cases are in BuildControllerTest.
+ * A directly constructed controller never passes the security firewall, so the 401 cases are in StaticSiteControllerTest.
  */
-final class BuildEnqueueTest extends TestCase
+final class StaticSiteEnqueueTest extends TestCase
 {
     /** A complete, valid build request payload. */
     private const PAYLOAD = [
-        'static_site_id' => '1234-5678',
-        'content_download_url' => 'https://cloud.example.com/collectives/publish/1234-5678',
-        'callback_status_url' => 'https://cloud.example.com/collectives/publish/1234-5678',
+        'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'build_id' => '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b',
+        'content_download_url' => 'https://cloud.example.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'callback_status_url' => 'https://cloud.example.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         'slug' => 'some_collective',
         'title' => 'Some Collective',
     ];
@@ -44,7 +46,7 @@ final class BuildEnqueueTest extends TestCase
     }
 
     /**
-     * Builds a POST /build request with $payload as its JSON body.
+     * Builds a POST /static-sites request with $payload as its JSON body.
      *
      * @param array<string, mixed> $payload The request body.
      * @return Request the request
@@ -52,10 +54,10 @@ final class BuildEnqueueTest extends TestCase
     private static function request(array $payload): Request
     {
         return Request::create(
-            '/build',
+            '/static-sites',
             'POST',
             server: ['CONTENT_TYPE' => 'application/json'],
-            content: (string) json_encode($payload),
+            content: (string) json_encode(['data' => $payload]),
         );
     }
 
@@ -63,11 +65,26 @@ final class BuildEnqueueTest extends TestCase
      * Builds the controller under test.
      *
      * @param MessageBusInterface $bus The bus the controller dispatches to.
-     * @return BuildController the controller, logging into $this->logged
+     * @return StaticSiteController the controller, logging into $this->logged
      */
-    private function controller(MessageBusInterface $bus): BuildController
+    private function controller(MessageBusInterface $bus): StaticSiteController
     {
-        return new BuildController($bus, new Logger('app', [$this->logged]));
+        return new StaticSiteController($bus, new Logger('app', [$this->logged]), self::emptyEntityManager());
+    }
+
+    /**
+     * Returns an entity manager that finds no site and runs a transaction's callback, rethrowing what it throws.
+     * The database part is covered through the kernel in StaticSiteControllerTest.
+     *
+     * @return EntityManagerInterface the stub
+     */
+    public static function emptyEntityManager(): EntityManagerInterface
+    {
+        $entityManager = self::createStub(EntityManagerInterface::class);
+        $entityManager->method('find')->willReturn(null);
+        $entityManager->method('wrapInTransaction')->willReturnCallback(static fn (callable $func): mixed => $func());
+
+        return $entityManager;
     }
 
     public function testDispatchesBuildJobAndReturns202(): void
@@ -83,6 +100,7 @@ final class BuildEnqueueTest extends TestCase
                 self::assertSame(self::PAYLOAD['title'], $build->title);
                 self::assertNull($build->render_options);
 
+                self::assertSame(self::PAYLOAD['build_id'], $build->build_id);
                 self::assertInstanceOf(UuidV7::class, Uuid::fromString($build->build_id));
 
                 self::assertInstanceOf(

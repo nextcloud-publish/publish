@@ -46,15 +46,18 @@ Send publish the build request Collectives would send. publish-worker then downl
 collective from `collectives-api-mock` and reports the build status back to it:
 
 ```bash
-curl -sS -X POST localhost:8080/build \
+curl -sS -X POST localhost:8080/static-sites \
   -H 'Authorization: Bearer dev-api-token-0123456789' \
   -H 'Content-Type: application/json' \
-  -d '{"static_site_id":"11f5b798-6f34-4951-ad8b-bfd623ded5c2","slug":"demo-site","title":"My Team Handbook",
+  -d '{"data":{"static_site_id":"11f5b798-6f34-4951-ad8b-bfd623ded5c2",
+       "build_id":"0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b","slug":"demo-site","title":"My Team Handbook",
        "content_download_url":"http://collectives-api-mock:8082/content/sample-collective.tar.gz",
-       "callback_status_url":"http://collectives-api-mock:8082/status/1234"}'
+       "callback_status_url":"http://collectives-api-mock:8082/status/1234"}}'
 ```
 
-publish answers `202` with `{"status":"enqueued"}`: the build is queued, not done yet.
+publish answers `202` with `{"status":"enqueued"}`: the build is queued, not done yet. The same
+request again answers `409`, since the site now exists; send a new `static_site_id` (`uuidgen`),
+`build_id` (a UUIDv7: `uuidgen --time-v7`) and `slug` for another one.
 
 The sample pages are in `docker/dev/collectives-api-mock/content/sample-collective/`. After changing
 them, rebuild the mock with `docker compose -f docker/dev/compose.yaml up -d --build collectives-api-mock`.
