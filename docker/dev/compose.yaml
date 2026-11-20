@@ -64,9 +64,9 @@ services:
       # Postgres 18 and later images keep their data under /var/lib/postgresql/<major>/,
       # so the volume goes on the parent directory, not on .../data.
       - postgres-data:/var/lib/postgresql
-    # No published port on purpose: this database serves the publish container only.
-    # bin/console and the tests on the host use a Postgres on the host (see the wiki page
-    # Develop publish), which would collide with a published 5432.
+    # For bin/console, PHPUnit and the pre-commit hook on the host; .env and .env.test point there.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       # Over TCP: during the first init the server listens only on its socket.
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-publish} -d publish"]
@@ -115,6 +115,8 @@ services:
       # var/ there as root on a fresh clone.
       BUILDS_DIR: /builds
       PAGES_DIR: /pages
+      # The same database as publish: the worker sets static_site.status after a build.
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-publish}:secret@postgres:5432/publish?serverVersion=${POSTGRES_VERSION:-18}&charset=utf8"
     volumes:
       - ../../../publish-worker:/publish-worker
       # Keeps the image's vendor/ visible under the mount above. A host-side
@@ -124,6 +126,8 @@ services:
       - ./pages:/pages
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     # Mandatory: the image CMD passes --time-limit=3600, so the worker exits hourly.
     restart: unless-stopped

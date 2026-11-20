@@ -118,7 +118,7 @@ server {
   }
 
   # Only the endpoints of publish; scans such as /wp-admin never reach the app
-  location ~ ^(/health|/auth-verification|/build)$ {
+  location ~ ^(/health|/auth-verification|/static-sites)$ {
     proxy_pass http://127.0.0.1:8080;
   }
 
@@ -175,6 +175,9 @@ docker compose up -d
 `publish` applies the database migrations of the new release when it starts; `docker compose logs
 publish` shows them. A failed migration stops the container, and `docker compose ps` shows it
 restarting.
+
+`publish-worker` uses the same database with the same user: after each build it sets the site's
+`static_site.status`. It owns no schema, so update publish first, then the worker.
 
 nginx in `nginx-fpm-gateway` resolves `publish` only when it starts. When `up -d` recreated `publish`, restart
 `nginx-fpm-gateway`, or the API answers `502`:
