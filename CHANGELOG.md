@@ -32,6 +32,8 @@ Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.en
 - **Breaking:** `static_site_id` must be a UUID, `400` otherwise. The client also sends the
   `build_id`, a UUIDv7, `400` otherwise; publish no longer generates it. Both are stored and
   enqueued in lower case.
+- **Breaking:** a site's `publish_url` is `<PUBLISH_BASE_URL>/<slug>/`, without the
+  `static_site_id`. Needs a publish-worker release that publishes sites at `PAGES_DIR/<slug>/`.
 
 ## [0.5.0] - 2026-11-15
 
