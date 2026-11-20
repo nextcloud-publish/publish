@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Entity\StaticSite;
 use App\Entity\StaticSiteStatus;
 use App\Message\BuildJob;
+use App\Message\BuildOperation;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -16,16 +17,19 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Routing\Requirement\Requirement;
 use Symfony\Component\Uid\Uuid;
 use Symfony\Component\Uid\UuidV7;
 
 /**
- * Validates a request for a new static site, stores it as a StaticSite and enqueues its first build as a BuildJob for publish-worker.
- * The security firewall authenticates the request before this controller is resolved.
+ * Creates, updates and deletes static sites: validates the request, writes the StaticSite and enqueues a BuildJob for publish-worker.
+ * The entry is committed before the job is dispatched, so publish-worker never looks for an entry that is not there yet.
+ * A failed dispatch undoes the write. The security firewall authenticates every request before this controller is resolved.
  *
  * @param MessageBusInterface $bus The bus that publishes the BuildJob to the `builds` transport.
  * @param LoggerInterface $logger The app logger.
  * @param EntityManagerInterface $entityManager Stores the StaticSite.
+ * @param int $pendingTimeoutSeconds How long a site may stay `pending` before a new operation may replace its current one.
  */
 final class StaticSiteController
 {
@@ -33,6 +37,7 @@ final class StaticSiteController
         private readonly MessageBusInterface $bus,
         private readonly LoggerInterface $logger,
         private readonly EntityManagerInterface $entityManager,
+        private readonly int $pendingTimeoutSeconds,
     ) {
     }
 
@@ -54,21 +59,332 @@ final class StaticSiteController
     /** The error of the 409 for a slug another site holds. */
     private const SLUG_TAKEN = 'slug already taken';
 
+    /** The error of the 409 for a site whose last operation is still pending. */
+    private const OPERATION_IN_PROGRESS = 'operation in progress';
+
+    // --- routes -------------------------------------------------------------
+
     /**
-     * Returns the build fields of $payload, title trimmed and both ids in lower-case canonical form.
-     * Every value must be a string: anything else would reach BuildJob's `string` type as a TypeError instead of a 400.
+     * Creates a static site and enqueues its first build, answering 202 once the broker confirms it.
+     * Answers 401 for a missing or wrong token, 400 for an invalid payload, 409 when the id or the slug is
+     * already stored, and 503 when the build could not be enqueued. Only a 202 leaves an entry behind.
      *
-     * @param array<mixed> $payload The decoded request body.
-     * @return array{static_site_id: string, build_id: string, slug: string, title: string, content_download_url: string, callback_status_url: string} the checked fields
-     * @throws \InvalidArgumentException with the error message for the 400 when $payload is invalid
+     * @param Request $request The POST /static-sites request.
+     * @return JsonResponse the status of the request
+     * @throws JsonException if the body is not valid JSON; Symfony answers it with a 400
      */
-    private function validatePayload(array $payload): array
+    #[Route('/static-sites', name: 'static_site_create', methods: ['POST'])]
+    public function create(Request $request): JsonResponse
     {
-        foreach (['static_site_id', 'build_id', 'slug', 'title', 'content_download_url', 'callback_status_url'] as $field) {
+        try {
+            $fields = $this->validateCreate($this->payload($request));
+        } catch (\InvalidArgumentException $e) {
+            return $this->invalid($e);
+        }
+
+        $build = new BuildJob(
+            build_id: $fields['build_id'],
+            static_site_id: $fields['static_site_id'],
+            operation: BuildOperation::Create,
+            slug: $fields['slug'],
+            callback_status_url: $fields['callback_status_url'],
+            created_at: self::now(),
+            title: $fields['title'],
+            content_download_url: $fields['content_download_url'],
+            // Unchecked: ssg-library validates it, and an invalid value ends the build as failed.
+            render_options: $fields['render_options'],
+        );
+        $logContext = self::logContext($build);
+
+        $siteId = Uuid::fromString($build->static_site_id);
+        if ($this->entityManager->find(StaticSite::class, $siteId) !== null) {
+            return $this->conflict(self::SITE_EXISTS, $logContext);
+        }
+
+        $site = new StaticSite($siteId, $build->slug, StaticSiteStatus::Pending, Uuid::fromString($build->build_id));
+        $this->entityManager->persist($site);
+
+        return $this->enqueue($build, $logContext, fn () => $this->entityManager->remove($site));
+    }
+
+    /**
+     * Rebuilds a stored site from new content, optionally under a new slug, answering 202 once the broker confirms it.
+     * Answers 404 for an unknown id, 409 while the site's last operation is pending or when another site holds the slug,
+     * and otherwise as create().
+     *
+     * @param Request $request The PATCH /static-sites/{id} request.
+     * @param string $id The site's static_site_id.
+     * @return JsonResponse the status of the request
+     * @throws JsonException if the body is not valid JSON; Symfony answers it with a 400
+     */
+    #[Route('/static-sites/{id}', name: 'static_site_update', requirements: ['id' => Requirement::UUID], methods: ['PATCH'])]
+    public function update(Request $request, string $id): JsonResponse
+    {
+        try {
+            $fields = $this->validateUpdate($this->payload($request));
+        } catch (\InvalidArgumentException $e) {
+            return $this->invalid($e);
+        }
+
+        $site = $this->entityManager->find(StaticSite::class, Uuid::fromString($id));
+        if ($site === null) {
+            return $this->notFound($id);
+        }
+
+        $slug = $fields['slug'] ?? $site->slug;
+        $build = new BuildJob(
+            build_id: $fields['build_id'],
+            static_site_id: $site->id->toRfc4122(),
+            operation: BuildOperation::Update,
+            slug: $slug,
+            callback_status_url: $fields['callback_status_url'],
+            created_at: self::now(),
+            title: $fields['title'],
+            content_download_url: $fields['content_download_url'],
+            previous_slug: $slug !== $site->slug ? $site->slug : null,
+            render_options: $fields['render_options'],
+        );
+
+        return $this->startOperation($site, $build);
+    }
+
+    /**
+     * Removes a stored site through publish-worker, which deletes the entry once the files are gone, answering 202
+     * once the broker confirms it. Answers 404 for an unknown id, 409 while the site's last operation is pending,
+     * and otherwise as create().
+     *
+     * @param Request $request The DELETE /static-sites/{id} request.
+     * @param string $id The site's static_site_id.
+     * @return JsonResponse the status of the request
+     * @throws JsonException if the body is not valid JSON; Symfony answers it with a 400
+     */
+    #[Route('/static-sites/{id}', name: 'static_site_delete', requirements: ['id' => Requirement::UUID], methods: ['DELETE'])]
+    public function delete(Request $request, string $id): JsonResponse
+    {
+        try {
+            $fields = $this->validateDelete($this->payload($request));
+        } catch (\InvalidArgumentException $e) {
+            return $this->invalid($e);
+        }
+
+        $site = $this->entityManager->find(StaticSite::class, Uuid::fromString($id));
+        if ($site === null) {
+            return $this->notFound($id);
+        }
+
+        $build = new BuildJob(
+            build_id: $fields['build_id'],
+            static_site_id: $site->id->toRfc4122(),
+            operation: BuildOperation::Delete,
+            slug: $site->slug,
+            callback_status_url: $fields['callback_status_url'],
+            created_at: self::now(),
+        );
+
+        return $this->startOperation($site, $build);
+    }
+
+    // --- enqueueing --------------------------------------------------------
+
+    /**
+     * Marks $site `pending` for $build and enqueues it, unless the site's last operation is still pending.
+     * A failed dispatch puts the site back as it was.
+     *
+     * @param StaticSite $site The stored site.
+     * @param BuildJob $build The update or delete to enqueue.
+     * @return JsonResponse the status of the request
+     */
+    private function startOperation(StaticSite $site, BuildJob $build): JsonResponse
+    {
+        $logContext = self::logContext($build);
+
+        if ($site->isBusy(new \DateTimeImmutable(), $this->pendingTimeoutSeconds)) {
+            return $this->conflict(self::OPERATION_IN_PROGRESS, $logContext);
+        }
+
+        $slug = $site->slug;
+        $status = $site->status;
+        $buildId = $site->buildId;
+        $site->startOperation(Uuid::fromString($build->build_id), $build->slug);
+
+        return $this->enqueue($build, $logContext, fn () => $site->restore($slug, $status, $buildId));
+    }
+
+    /**
+     * Commits the pending write, then dispatches $build, answering 202 once the broker confirms it.
+     * Answers 409 when the commit violates the id or the slug constraint, and 503 when the commit or the dispatch fails.
+     * After a failed dispatch $undo reverts the write, so a 503 leaves the entry as it was before the request.
+     *
+     * @param BuildJob $build The job to dispatch.
+     * @param array<string, string> $logContext The ids of the request.
+     * @param \Closure(): void $undo Reverts the pending write on the managed entity.
+     * @return JsonResponse the status of the request
+     */
+    private function enqueue(BuildJob $build, array $logContext, \Closure $undo): JsonResponse
+    {
+        try {
+            $this->entityManager->flush();
+        } catch (UniqueConstraintViolationException $e) {
+            // The slug belongs to another site, or a parallel request created the same id since find().
+            $slugTaken = str_contains($e->getMessage(), StaticSite::SLUG_CONSTRAINT);
+            return $this->conflict($slugTaken ? self::SLUG_TAKEN : self::SITE_EXISTS, $logContext);
+        } catch (\Throwable $e) {
+            return $this->notEnqueued($e, $logContext);
+        }
+
+        try {
+            // Blocks until the broker confirms the publish (confirm_timeout in config/packages/messenger.yaml).
+            $this->bus->dispatch($build);
+        } catch (\Throwable $e) {
+            // Broader than Messenger's TransportException on purpose: an unset AMQP_DSN or a
+            // serialization failure must not produce a 202 either.
+            try {
+                $undo();
+                $this->entityManager->flush();
+            } catch (\Throwable $undoError) {
+                $this->logger->error('Could not undo the static_site entry', $logContext + ['exception' => $undoError]);
+            }
+
+            return $this->notEnqueued($e, $logContext);
+        }
+
+        $this->logger->info('Build enqueued', $logContext);
+        return new JsonResponse(['status' => 'enqueued'], Response::HTTP_ACCEPTED);
+    }
+
+    // --- answers -----------------------------------------------------------
+
+    /**
+     * Answers 400 with the message of $e, logging it as a rejected request.
+     *
+     * @param \InvalidArgumentException $e The validation error.
+     * @return JsonResponse the 400
+     */
+    private function invalid(\InvalidArgumentException $e): JsonResponse
+    {
+        $this->logger->warning('Build request rejected', ['reason' => $e->getMessage()]);
+
+        return new JsonResponse(['status' => 'invalid', 'error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
+    }
+
+    /**
+     * Answers 404 for an unknown site, logging it as a rejected request.
+     *
+     * @param string $id The id from the path.
+     * @return JsonResponse the 404
+     */
+    private function notFound(string $id): JsonResponse
+    {
+        $this->logger->warning('Build request rejected', ['static_site_id' => $id, 'reason' => 'static site not found']);
+
+        return new JsonResponse(['status' => 'not_found', 'error' => 'static site not found'], Response::HTTP_NOT_FOUND);
+    }
+
+    /**
+     * Answers 409 with $error, logging it as a rejected request.
+     *
+     * @param string $error SITE_EXISTS or SLUG_TAKEN.
+     * @param array<string, string> $logContext The ids of the request.
+     * @return JsonResponse the 409
+     */
+    private function conflict(string $error, array $logContext): JsonResponse
+    {
+        $this->logger->warning('Build request rejected', $logContext + ['reason' => $error]);
+
+        return new JsonResponse(['status' => 'conflict', 'error' => $error], Response::HTTP_CONFLICT);
+    }
+
+    /**
+     * Answers 503 for a job that was not enqueued, logging $e.
+     *
+     * @param \Throwable $e Why the commit or the dispatch failed.
+     * @param array<string, string> $logContext The ids of the request.
+     * @return JsonResponse the 503
+     */
+    private function notEnqueued(\Throwable $e, array $logContext): JsonResponse
+    {
+        $this->logger->error('Could not enqueue build', $logContext + ['exception' => $e]);
+
+        return new JsonResponse(['status' => 'error', 'error' => 'could not enqueue build'], Response::HTTP_SERVICE_UNAVAILABLE);
+    }
+
+    /**
+     * Returns the ids of $build for the log; the URLs would repeat them.
+     *
+     * @param BuildJob $build The job of the request.
+     * @return array<string, string> build_id, static_site_id, operation and slug
+     */
+    private static function logContext(BuildJob $build): array
+    {
+        return [
+            'build_id' => $build->build_id,
+            'static_site_id' => $build->static_site_id,
+            'operation' => $build->operation->value,
+            'slug' => $build->slug,
+        ];
+    }
+
+    /**
+     * Returns the current time for BuildJob's created_at.
+     *
+     * @return string the time in ATOM format
+     */
+    private static function now(): string
+    {
+        return (new \DateTimeImmutable('now'))->format(\DateTimeInterface::ATOM);
+    }
+
+    // --- validation --------------------------------------------------------
+
+    /**
+     * Returns the fields under `data` in the body of $request; anything outside it is ignored.
+     *
+     * @param Request $request The request.
+     * @return array<mixed> the decoded fields
+     * @throws JsonException if the body is not valid JSON
+     * @throws \InvalidArgumentException if the body has no `data` object
+     */
+    private function payload(Request $request): array
+    {
+        // The firewall answers an unauthenticated request with a 401 on kernel.request, so
+        // toArray() and its JsonException are never reached without a valid token.
+        $payload = $request->toArray()['data'] ?? null;
+
+        if (!\is_array($payload)) {
+            throw new \InvalidArgumentException('missing required fields');
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Checks that every field in $fields is set in $payload.
+     *
+     * @param array<mixed> $payload The decoded fields.
+     * @param list<string> $fields The required field names.
+     * @return void
+     * @throws \InvalidArgumentException if one is missing
+     */
+    private function requireFields(array $payload, array $fields): void
+    {
+        foreach ($fields as $field) {
             if (!isset($payload[$field])) {
                 throw new \InvalidArgumentException('missing required fields');
             }
         }
+    }
+
+    /**
+     * Returns the fields of a create, title trimmed and both ids in lower-case canonical form.
+     * Every value must be a string: anything else would reach BuildJob's `string` type as a TypeError instead of a 400.
+     *
+     * @param array<mixed> $payload The decoded fields.
+     * @return array{static_site_id: string, build_id: string, slug: string, title: string, content_download_url: string, callback_status_url: string, render_options: mixed} the checked fields
+     * @throws \InvalidArgumentException with the error message for the 400 when $payload is invalid
+     */
+    private function validateCreate(array $payload): array
+    {
+        $this->requireFields($payload, ['static_site_id', 'build_id', 'slug', 'title', 'content_download_url', 'callback_status_url']);
 
         return [
             'static_site_id' => $this->validateUuid($payload['static_site_id'], 'static_site_id'),
@@ -77,6 +393,45 @@ final class StaticSiteController
             'content_download_url' => $this->validateUrl($payload['content_download_url'], 'content_download_url'),
             'callback_status_url' => $this->validateUrl($payload['callback_status_url'], 'callback_status_url'),
             'title' => $this->validateTitle($payload['title']),
+            'render_options' => $payload['render_options'] ?? null,
+        ];
+    }
+
+    /**
+     * Returns the fields of an update; slug is null when the request keeps the stored one.
+     *
+     * @param array<mixed> $payload The decoded fields.
+     * @return array{build_id: string, slug: ?string, title: string, content_download_url: string, callback_status_url: string, render_options: mixed} the checked fields
+     * @throws \InvalidArgumentException with the error message for the 400 when $payload is invalid
+     */
+    private function validateUpdate(array $payload): array
+    {
+        $this->requireFields($payload, ['build_id', 'title', 'content_download_url', 'callback_status_url']);
+
+        return [
+            'build_id' => $this->validateUuidV7($payload['build_id'], 'build_id'),
+            'slug' => isset($payload['slug']) ? $this->validateSafeId($payload['slug'], 'slug') : null,
+            'content_download_url' => $this->validateUrl($payload['content_download_url'], 'content_download_url'),
+            'callback_status_url' => $this->validateUrl($payload['callback_status_url'], 'callback_status_url'),
+            'title' => $this->validateTitle($payload['title']),
+            'render_options' => $payload['render_options'] ?? null,
+        ];
+    }
+
+    /**
+     * Returns the fields of a delete.
+     *
+     * @param array<mixed> $payload The decoded fields.
+     * @return array{build_id: string, callback_status_url: string} the checked fields
+     * @throws \InvalidArgumentException with the error message for the 400 when $payload is invalid
+     */
+    private function validateDelete(array $payload): array
+    {
+        $this->requireFields($payload, ['build_id', 'callback_status_url']);
+
+        return [
+            'build_id' => $this->validateUuidV7($payload['build_id'], 'build_id'),
+            'callback_status_url' => $this->validateUrl($payload['callback_status_url'], 'callback_status_url'),
         ];
     }
 
@@ -171,104 +526,5 @@ final class StaticSiteController
         }
 
         return $title;
-    }
-
-    /**
-     * Answers 409 with $error, logging it as a rejected request.
-     *
-     * @param string $error SITE_EXISTS or SLUG_TAKEN.
-     * @param array<string, string> $logContext The ids of the request.
-     * @return JsonResponse the 409
-     */
-    private function conflict(string $error, array $logContext): JsonResponse
-    {
-        $this->logger->warning('Build request rejected', $logContext + ['reason' => $error]);
-
-        return new JsonResponse(['status' => 'conflict', 'error' => $error], Response::HTTP_CONFLICT);
-    }
-
-    /**
-     * Creates a static site and enqueues its first build, answering 202 once the broker confirms it.
-     * Answers 401 for a missing or wrong token, 400 for an invalid payload, 409 when the id or the slug is
-     * already stored, and 503 when the build could not be enqueued. Only a 202 leaves an entry behind.
-     *
-     * @param Request $request The POST /static-sites request.
-     * @return JsonResponse the status of the request
-     * @throws JsonException if the body is not valid JSON; Symfony answers it with a 400
-     */
-    #[Route('/static-sites', name: 'static_site_create', methods: ['POST'])]
-    public function __invoke(Request $request): JsonResponse
-    {
-        // The firewall answers an unauthenticated request with a 401 on kernel.request, so
-        // toArray() and its JsonException are never reached without a valid token.
-        // The fields travel under "data"; anything outside it is ignored.
-        $payload = $request->toArray()['data'] ?? null;
-
-        try {
-            if (!\is_array($payload)) {
-                throw new \InvalidArgumentException('missing required fields');
-            }
-            $fields = $this->validatePayload($payload);
-        } catch (\InvalidArgumentException $e) {
-            $this->logger->warning('Build request rejected', ['reason' => $e->getMessage()]);
-            return new JsonResponse(['status' => 'invalid', 'error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
-        }
-
-        $build = new BuildJob(
-            build_id: $fields['build_id'],
-            static_site_id: $fields['static_site_id'],
-            slug: $fields['slug'],
-            title: $fields['title'],
-            content_download_url: $fields['content_download_url'],
-            callback_status_url: $fields['callback_status_url'],
-            created_at: (new \DateTimeImmutable('now'))->format(\DateTimeInterface::ATOM),
-            // Unchecked: ssg-library validates it, and an invalid value ends the build as failed.
-            render_options: $payload['render_options'] ?? null,
-        );
-
-        // The ids identify the build; the URLs would repeat them.
-        $logContext = [
-            'build_id' => $build->build_id,
-            'static_site_id' => $build->static_site_id,
-            'slug' => $build->slug,
-        ];
-
-        // POST only creates; an existing site is changed through its own resource.
-        $siteId = Uuid::fromString($build->static_site_id);
-        if ($this->entityManager->find(StaticSite::class, $siteId) !== null) {
-            return $this->conflict(self::SITE_EXISTS, $logContext);
-        }
-
-        try {
-            // The entry and the job stand or fall together: a failed dispatch rolls the insert back,
-            // so a 503 leaves no entry behind and the client's retry is not answered with a 409.
-            $this->entityManager->wrapInTransaction(function () use ($siteId, $build): void {
-                $this->entityManager->persist(new StaticSite(
-                    $siteId,
-                    $build->slug,
-                    StaticSiteStatus::Pending,
-                    Uuid::fromString($build->build_id),
-                ));
-                $this->entityManager->flush();
-
-                // Blocks until the broker confirms the publish (confirm_timeout in config/packages/messenger.yaml).
-                $this->bus->dispatch($build);
-            });
-        } catch (UniqueConstraintViolationException $e) {
-            // The slug belongs to another site, or a parallel request created the same id since find().
-            $slugTaken = str_contains($e->getMessage(), StaticSite::SLUG_CONSTRAINT);
-            return $this->conflict($slugTaken ? self::SLUG_TAKEN : self::SITE_EXISTS, $logContext);
-        } catch (\Throwable $e) {
-            // Broader than Messenger's TransportException on purpose: an unset AMQP_DSN or a
-            // serialization failure must not produce a 202 either.
-            $this->logger->error('Could not enqueue build', $logContext + ['exception' => $e]);
-            return new JsonResponse(
-                ['status' => 'error', 'error' => 'could not enqueue build'],
-                Response::HTTP_SERVICE_UNAVAILABLE,
-            );
-        }
-
-        $this->logger->info('Build enqueued', $logContext);
-        return new JsonResponse(['status' => 'enqueued'], Response::HTTP_ACCEPTED);
     }
 }

@@ -237,7 +237,7 @@ final class OpenApiTest extends WebTestCase
         $bus->method('dispatch')->willThrowException(new TransportException('connection refused'));
 
         $request = Request::create('/static-sites', 'POST', content: json_encode(['data' => self::PAYLOAD], JSON_THROW_ON_ERROR));
-        $response = (new StaticSiteController($bus, new NullLogger(), StaticSiteEnqueueTest::emptyEntityManager()))($request);
+        $response = (new StaticSiteController($bus, new NullLogger(), StaticSiteEnqueueTest::emptyEntityManager(), 600))->create($request);
 
         self::assertSame(503, $response->getStatusCode());
         $this->assertAnswerMatchesSpec($response, 'post', '/static-sites');
@@ -262,5 +262,43 @@ final class OpenApiTest extends WebTestCase
     public function testTheSpecRejectsWhatTheAppRejects(string $field, mixed $value): void
     {
         self::assertFalse(self::specAccepts([...self::PAYLOAD, $field => $value]));
+    }
+
+    /**
+     * Provides the answers of an update and a delete: queued, unknown id, and pending.
+     *
+     * @return array<string, array{string, array<string, string>}> method and data, keyed by operation
+     */
+    public static function siteOperations(): array
+    {
+        $build = ['build_id' => '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5c', 'callback_status_url' => self::PAYLOAD['callback_status_url']];
+
+        return [
+            'update' => ['PATCH', [...$build, 'title' => 'Revised', 'content_download_url' => self::PAYLOAD['content_download_url']]],
+            'delete' => ['DELETE', $build],
+        ];
+    }
+
+    /** @param array<string, string> $data The request fields. */
+    #[DataProvider('siteOperations')]
+    public function testTheUpdateAndDeleteAnswersMatchTheSpec(string $method, array $data): void
+    {
+        $client = static::createClient();
+        $path = '/static-sites/' . self::PAYLOAD['static_site_id'];
+
+        $client->jsonRequest($method, $path, ['data' => $data], self::AUTH);
+        self::assertSame(404, $client->getResponse()->getStatusCode());
+        $this->assertAnswerMatchesSpec($client->getResponse(), strtolower($method), '/static-sites/{id}');
+
+        $client->jsonRequest('POST', '/static-sites', ['data' => self::PAYLOAD], self::AUTH);
+        $client->jsonRequest($method, $path, ['data' => $data], self::AUTH);
+        self::assertSame(409, $client->getResponse()->getStatusCode(), 'the create is still pending');
+        $this->assertAnswerMatchesSpec($client->getResponse(), strtolower($method), '/static-sites/{id}');
+
+        static::getContainer()->get(\Doctrine\ORM\EntityManagerInterface::class)->getConnection()
+            ->executeStatement("UPDATE static_site SET status = 'published'");
+        $client->jsonRequest($method, $path, ['data' => $data], self::AUTH);
+        self::assertSame(202, $client->getResponse()->getStatusCode());
+        $this->assertAnswerMatchesSpec($client->getResponse(), strtolower($method), '/static-sites/{id}');
     }
 }

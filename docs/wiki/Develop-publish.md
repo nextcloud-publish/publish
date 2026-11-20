@@ -66,23 +66,46 @@ them, rebuild the mock with `docker compose -f docker/dev/compose.yaml up -d --b
 
 ```bash
 # 200 once publish-worker has published the site
-curl -I http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/
+curl -I http://127.0.0.1:8081/demo-site/
 
 # The status callback publish-worker sent
 docker compose -f docker/dev/compose.yaml logs collectives-api-mock | grep CALLBACK
 
 # The published files
-ls -R docker/dev/pages/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/
+ls -R docker/dev/pages/demo-site/
 ```
 
 A successful build shows this callback:
 
 ```text
-CALLBACK PATCH /status/1234 -> 204 body={"status":"published","data":{"publish_url":"http:\/\/127.0.0.1:8081\/11f5b798-6f34-4951-ad8b-bfd623ded5c2\/demo-site\/"}}
+CALLBACK PATCH /status/1234 -> 204 body={"status":"published","data":{"publish_url":"http:\/\/127.0.0.1:8081\/demo-site\/"}}
 ```
 
-Open `http://127.0.0.1:8081/11f5b798-6f34-4951-ad8b-bfd623ded5c2/demo-site/` in a browser to see the site.
-`http://127.0.0.1:8081/` lists every published `static_site_id`.
+Open `http://127.0.0.1:8081/demo-site/` in a browser to see the site.
+`http://127.0.0.1:8081/` lists every published slug.
+
+## Update and delete
+
+Once the site is `published`, rebuild it under a new slug, then delete it. Each request needs a new
+`build_id` (`uuidgen --time-v7`):
+
+```bash
+curl -sS -X PATCH localhost:8080/static-sites/11f5b798-6f34-4951-ad8b-bfd623ded5c2 \
+  -H 'Authorization: Bearer dev-api-token-0123456789' \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"build_id":"0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5c","slug":"handbook","title":"My Team Handbook",
+       "content_download_url":"http://collectives-api-mock:8082/content/sample-collective.tar.gz",
+       "callback_status_url":"http://collectives-api-mock:8082/status/1234"}}'
+
+curl -sS -X DELETE localhost:8080/static-sites/11f5b798-6f34-4951-ad8b-bfd623ded5c2 \
+  -H 'Authorization: Bearer dev-api-token-0123456789' \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"build_id":"0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5d",
+       "callback_status_url":"http://collectives-api-mock:8082/status/1234"}}'
+```
+
+The update moves the site to `/handbook/`; the delete removes it and reports `deleted`. A second
+request while the first is pending answers `409`.
 
 If the site or the callback doesn't show up, follow the build in the logs, see
 [Logs and debugging](#logs-and-debugging). publish-worker adds `build_id`, `static_site_id`, `slug` and
@@ -98,6 +121,7 @@ To build from Collectives in a local Nextcloud instead of `collectives-api-mock`
 | Port | What |
 | --- | --- |
 | 8080 | the API, token `dev-api-token-0123456789` |
+| 5432 | Postgres, `publish` / `secret`, for `bin/console` and the tests on the host; `POSTGRES_PORT` in `docker/dev/.env` changes it |
 | 5672 | RabbitMQ AMQP, for a worker running on the host |
 | 15672 | RabbitMQ management UI, `publish` / `secret` |
 | 8081 | the published sites, from `docker/dev/pages/` |
@@ -155,12 +179,10 @@ explains the log messages.
 ## Database
 
 publish uses Doctrine ORM on Postgres 18. Its one table, `static_site`, is mapped by
-`src/Entity/StaticSite.php`. Development has two databases:
-
-- **In the dev stack:** the `postgres` container, user `publish`, password `secret`, database
-  `publish`. Only the `publish` container reaches it; its port is not published on the host.
-- **On the host:** for `bin/console`, PHPUnit and the pre-commit hook run on the host. `.env`
-  points them at `127.0.0.1:5432` with the same user and password.
+`src/Entity/StaticSite.php`. The dev stack's `postgres` container (user `publish`, password
+`secret`, database `publish`) serves both the `publish` container and the host: it is published on
+`127.0.0.1:5432`, where `.env` and `.env.test` point `bin/console`, PHPUnit and the pre-commit hook.
+They need the dev stack running.
 
 | Task | Command |
 | --- | --- |
@@ -174,26 +196,24 @@ starts, in the dev stack too: `docker compose -f docker/dev/compose.yaml restart
 commands on the host, or in the `publish` container with `docker compose -f docker/dev/compose.yaml
 exec publish …` to act on the dev stack's database instead.
 
-### Set up Postgres on the host
+### PHP on the host
 
-1. Install the PHP driver. Without it Doctrine fails with `could not find driver`.
-   - Arch, Manjaro: `sudo pacman -S php-pgsql`, then enable `extension=pdo_pgsql` in
-     `/etc/php/php.ini`.
-   - Debian, Ubuntu: `sudo apt install php8.5-pgsql`.
+The host's PHP needs the Postgres driver. Without it Doctrine fails with `could not find driver`.
 
-   `php -m | grep pdo_pgsql` confirms it.
-2. Install and start Postgres from your distribution, then create the user and database. The
-   user needs `CREATEDB`, because the tests' database is created by it:
+- Arch, Manjaro: `sudo pacman -S php-pgsql`, then enable `extension=pdo_pgsql` in
+  `/etc/php/php.ini`.
+- Debian, Ubuntu: `sudo apt install php8.5-pgsql`.
 
-   ```bash
-   sudo -u postgres psql -c "CREATE ROLE publish WITH LOGIN PASSWORD 'secret' CREATEDB;"
-   sudo -u postgres createdb -O publish publish
-   ```
-3. `php bin/console dbal:run-sql "SELECT version()"` should print the server version.
+`php -m | grep pdo_pgsql` confirms it, and `php bin/console dbal:run-sql "SELECT version()"`
+prints the server version once the dev stack is up.
 
-If your host Postgres is not version 18, or you use another user or port, put your own
-`DATABASE_URL` into `.env.local`, which git ignores, rather than changing `.env`. Keep
-`serverVersion` at your server's major version, Doctrine generates its SQL for it:
+### Your own Postgres
+
+A Postgres already on the host's `5432` collides with the published port: set `POSTGRES_PORT` in
+`docker/dev/.env` to another port, or use your own server for the host. For your own server, or
+another user or port, put your own `DATABASE_URL` into `.env.local`, which git ignores, rather than
+changing `.env`. The user needs `CREATEDB` for the tests' database. Keep `serverVersion` at your
+server's major version, Doctrine generates its SQL for it:
 
 ```dotenv
 DATABASE_URL="postgresql://publish:secret@127.0.0.1:5432/publish?serverVersion=17&charset=utf8"
@@ -205,27 +225,28 @@ password logins over TCP. Set the method of the `host … 127.0.0.1/32` line in 
 
 ## PHPUnit
 
-The tests send the token from `.env.test`. The container's `PUBLISH_API_TOKEN` would win over it,
-so set it for the run:
+With PHP 8.5, `pdo_pgsql` and `composer install` on the host, and the dev stack up:
 
 ```bash
-docker compose -f docker/dev/compose.yaml exec -e PUBLISH_API_TOKEN=test-api-token-0123456789 publish php bin/phpunit
+php bin/phpunit
 ```
 
-With PHP 8.5 and `composer install` on the host, `php bin/phpunit` works too. The tests use an
-in-memory transport and need no broker. `tests/OpenApiTest.php` checks every answer against
-`openapi.yaml`.
-
-The tests do need a database: they use `publish_test` (Doctrine appends `_test` in the test env)
-on the [host Postgres](#set-up-postgres-on-the-host). Create it once, and migrate it after every
-new migration:
+The tests use an in-memory transport and need no broker. `tests/OpenApiTest.php` checks every
+answer against `openapi.yaml`. They do need a database: `publish_test` (Doctrine appends `_test`
+in the test env) on the dev stack's Postgres. Create it once, and migrate it after every new
+migration:
 
 ```bash
 php bin/console doctrine:database:create --env=test --if-not-exists
 php bin/console doctrine:migrations:migrate --env=test --no-interaction --allow-no-migration
 ```
 
-Inside the `publish` container the same commands use the dev stack's Postgres instead.
+In the `publish` container the tests run too. The container's `PUBLISH_API_TOKEN` wins over the
+token in `.env.test`, so set it for the run:
+
+```bash
+docker compose -f docker/dev/compose.yaml exec -e PUBLISH_API_TOKEN=test-api-token-0123456789 publish php bin/phpunit
+```
 
 ## PHPStan
 
@@ -249,7 +270,7 @@ docker compose -f docker/dev/compose.yaml exec publish vendor/bin/php-cs-fixer f
 
 [pre-commit](https://pre-commit.com/) runs the CI lint steps, the style check, PHPStan and the
 tests before each commit. It needs PHP 8.5, `ext-amqp`, `ext-pdo_pgsql` and `composer install` on the host,
-and the [host Postgres](#set-up-postgres-on-the-host) running for the tests. Install the hook once:
+and the dev stack running for the tests' database. Install the hook once:
 
 ```bash
 pre-commit install

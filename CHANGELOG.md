@@ -17,6 +17,13 @@ Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.en
 - The `publish` container applies pending database migrations when it starts.
 - The `static_site` table, created by the first migration: one entry per site with its id, a
   unique slug, a status and the id of its last build.
+- `PATCH /static-sites/{id}` rebuilds a site from new content, optionally under a new `slug`, and
+  `DELETE /static-sites/{id}` removes it. Both take a new `build_id`, answer `404` for an unknown
+  id and `409` while the site's last operation is pending. Needs a publish-worker release that
+  handles `operation`; Nextcloud has to accept the new `deleted` callback status.
+- `PENDING_TIMEOUT_SECONDS` (default `600`): after that long in `pending`, a site takes a new
+  update or delete.
+- `static_site.updated_at`, the time publish last wrote the entry, added by a migration.
 - `publish-worker` gets `DATABASE_URL` in `docker/compose.yaml` and waits for `postgres`: it
   sets `static_site.status` to `published` after a build, or removes the published site and
   deletes the entry when the build fails for good. Needs a publish-worker release that reads it.
@@ -32,6 +39,10 @@ Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.en
 - **Breaking:** `static_site_id` must be a UUID, `400` otherwise. The client also sends the
   `build_id`, a UUIDv7, `400` otherwise; publish no longer generates it. Both are stored and
   enqueued in lower case.
+- **Breaking:** every `BuildJob` carries `operation` (`create`, `update` or `delete`); a delete has
+  no `title` and no `content_download_url`. Needs the publish-worker release that requires it.
+- publish commits the `static_site` entry before it dispatches the build, so publish-worker
+  always finds it; a failed dispatch undoes the write and answers `503`.
 - **Breaking:** a site's `publish_url` is `<PUBLISH_BASE_URL>/<slug>/`, without the
   `static_site_id`. Needs a publish-worker release that publishes sites at `PAGES_DIR/<slug>/`.
 

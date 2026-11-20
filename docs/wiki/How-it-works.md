@@ -50,11 +50,21 @@ is the only check.
 
 ## The build message
 
-`POST /static-sites` only creates. The fields travel under `data`, and Collectives generates both
-ids: `static_site_id` (a UUID) and `build_id` (a UUIDv7). `StaticSiteController` answers `409` when
-the `static_site_id` is already stored or another site holds the `slug`. Otherwise it stores the
-site in `static_site` (status `pending`, the client's `build_id`) and dispatches its build in one
-database transaction, so a failed dispatch leaves no entry behind.
+| Request | Operation | Fields under `data` |
+| --- | --- | --- |
+| `POST /static-sites` | `create` | `static_site_id`, `build_id`, `slug`, `title`, `content_download_url`, `callback_status_url`, `render_options` |
+| `PATCH /static-sites/{id}` | `update` | `build_id`, `title`, `content_download_url`, `callback_status_url`, optional `slug` and `render_options` |
+| `DELETE /static-sites/{id}` | `delete` | `build_id`, `callback_status_url` |
+
+Collectives generates both ids: `static_site_id` (a UUID) and every `build_id` (a UUIDv7).
+`StaticSiteController` stores the site in `static_site` as `pending` with the request's
+`build_id`, commits, then dispatches the build. A failed dispatch undoes the write: a create leaves
+no entry, an update or delete leaves the entry as it was.
+
+A create answers `409` when the `static_site_id` is already stored or another site holds the
+`slug`. An update or delete answers `404` for an unknown id, and `409` while the site's last
+operation is pending, unless it has been pending for longer than `PENDING_TIMEOUT_SECONDS`
+(default 600). An update with a new `slug` sends the old one as `previous_slug`.
 
 `StaticSiteController` dispatches an `App\Message\BuildJob` through
 [Symfony Messenger](https://symfony.com/doc/current/messenger.html).
@@ -64,12 +74,12 @@ default exchange with `q.builds` as the routing key. publish has no handler for 
 The body is JSON from Messenger's `symfony_serializer`; the class's property names are the keys:
 
 ```json
-{ "build_id": "...", "static_site_id": "...", "slug": "...", "title": "...",
-  "content_download_url": "...", "callback_status_url": "...", "created_at": "...",
-  "render_options": null }
+{ "build_id": "...", "static_site_id": "...", "operation": "create", "slug": "...",
+  "callback_status_url": "...", "created_at": "...", "title": "...",
+  "content_download_url": "...", "previous_slug": null, "render_options": null }
 ```
 
-`build_id` is a UUID v7 publish generates per request. Messenger adds a `type` header with the
+A delete has `title` and `content_download_url` `null`. Messenger adds a `type` header with the
 class name and `X-Message-Stamp-*` headers.
 
 `render_options` is any JSON value from the request, `null` when it is absent. publish and
@@ -77,8 +87,8 @@ publish-worker pass it on unchecked; ssg-library validates it and lists the
 [options](https://github.com/nextcloud-publish/ssg-library#render-options).
 
 publish-worker decodes the body into its own `App\Message\BuildJob`, found by the `type` header. Both
-classes have the same namespace, name and properties. Every property except `render_options` is
-required, so they change together; a message that does not decode is dropped without a callback.
+classes have the same namespace, name and properties, and `operation` is required, so they change
+together; a message that does not decode is dropped without a callback.
 
 ## RabbitMQ
 
@@ -92,20 +102,23 @@ publish-worker takes one message at a time: it downloads the archive, extracts i
 with [ssg-library](https://github.com/nextcloud-publish/ssg-library), and swaps the site into
 `pages/<slug>/`. Then it PATCHes the outcome to `callback_status_url`.
 
+A delete builds nothing: publish-worker removes `pages/<slug>/`, then the entry, then reports
+`deleted`. An update with a new slug removes `pages/<previous_slug>/` after the swap.
+
 | Outcome | What happens |
 | --- | --- |
-| Success | the site goes live, `static_site.status` becomes `published`, and `published` with the `publish_url` is reported |
-| Transient failure | retried once after 15s through the `delays` exchange; a second failure removes the site and its entry, then reports `failed` |
-| Permanent failure | the site and its entry are removed and `failed` is reported at once: an archive without a Markdown page, invalid `render_options`, or a callback answered with a 3xx or a 4xx other than 408 and 429 |
+| Success | create and update: the site goes live, `static_site.status` becomes `published`, and `published` with the `publish_url` is reported. Delete: the site and its entry are gone, and `deleted` is reported |
+| Transient failure | retried once after 15s through the `delays` exchange, then handled as a permanent failure |
+| Permanent failure | `failed` is reported. A create first removes its site and its entry; an update or delete keeps what is published and marks the entry `failed` |
 
-The callback body is `{"status": "published", "data": {"publish_url": ...}}` or
-`{"status": "failed", "data": {"error_message": ...}}`. Delivery is at-least-once, so Nextcloud
-must treat a repeated status as one.
+The callback body is `{"status": "published", "data": {"publish_url": ...}}`,
+`{"status": "deleted", "data": {}}` or `{"status": "failed", "data": {"error_message": ...}}`.
+Nextcloud has to accept all three. Delivery is at-least-once, so Nextcloud must treat a repeated
+status as one.
 
-A failed build leaves nothing behind: the published site and the `static_site` entry are removed
-before `failed` is reported, so Collectives can POST the site again with a new `build_id`. Only
-when publish-worker cannot reach the database does the entry stay; the next POST then gets a
-`409` until an operator removes it.
+A failed create leaves nothing behind, so Collectives can POST the site again with a new
+`build_id`. Only when publish-worker cannot reach the database does the entry stay; the next POST
+then gets a `409` until an operator removes it.
 
 [build-pipeline.md](https://github.com/nextcloud-publish/publish-worker/blob/main/docs/build-pipeline.md)
 in publish-worker describes the directories, the swap and the retries in detail.
