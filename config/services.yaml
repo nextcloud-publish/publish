@@ -38,3 +38,7 @@ services:
             # fails loudly (Symfony cannot resolve the env var); blank fails
             # closed (every request gets a 401).
             $apiToken: '%env(PUBLISH_API_TOKEN)%'
+
+    App\Controller\StaticSiteController:
+        arguments:
+            $pendingTimeoutSeconds: '%env(int:PENDING_TIMEOUT_SECONDS)%'

@@ -8,6 +8,7 @@ use App\Controller\StaticSiteController;
 use App\Entity\StaticSite;
 use App\Entity\StaticSiteStatus;
 use App\Message\BuildJob;
+use App\Message\BuildOperation;
 use App\Tests\ResetsStaticSites;
 use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Handler\TestHandler;
@@ -105,11 +106,7 @@ final class StaticSiteControllerTest extends WebTestCase
         // A 202 means every step of the auth chain granted access: header extractor,
         // ApiTokenHandler, api_clients provider, ROLE_API and the access_control rule.
         self::assertResponseStatusCodeSame(202);
-        self::assertResponseHeaderSame('content-type', 'application/json');
-        self::assertJsonStringEqualsJsonString(
-            '{"status":"enqueued"}',
-            (string) $client->getResponse()->getContent(),
-        );
+        self::assertSame('', (string) $client->getResponse()->getContent());
 
         self::assertEmpty(
             $client->getResponse()->headers->getCookies(),
@@ -133,7 +130,7 @@ final class StaticSiteControllerTest extends WebTestCase
         self::assertSame(Level::Info, $logged[0]->level);
         self::assertSame('Build enqueued', $logged[0]->message);
         self::assertSame(
-            ['build_id' => $build->build_id, 'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70', 'slug' => 'some_collective'],
+            ['build_id' => $build->build_id, 'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70', 'operation' => 'create', 'slug' => 'some_collective'],
             $logged[0]->context,
         );
     }
@@ -179,7 +176,7 @@ final class StaticSiteControllerTest extends WebTestCase
     {
         self::assertResponseStatusCodeSame(409);
         self::assertJsonStringEqualsJsonString(
-            (string) json_encode(['status' => 'conflict', 'error' => $error]),
+            (string) json_encode(['data' => ['error_message' => $error]]),
             (string) $client->getResponse()->getContent(),
         );
         self::assertCount(0, self::sentToBuilds(), 'a rejected request must not be enqueued');
@@ -221,42 +218,33 @@ final class StaticSiteControllerTest extends WebTestCase
         self::assertNotNull(self::storedSite(self::PAYLOAD['static_site_id']));
     }
 
-    public function testANonUuidIdIsABadRequest(): void
-    {
-        $client = static::createClient();
-        self::postSite($client, [...self::PAYLOAD, 'static_site_id' => '1234-5678'], self::AUTH);
-
-        self::assertResponseStatusCodeSame(400);
-        self::assertJsonStringEqualsJsonString(
-            '{"status":"invalid","error":"static_site_id must be a UUID"}',
-            (string) $client->getResponse()->getContent(),
-        );
-        self::assertCount(0, self::sentToBuilds());
-    }
-
     /**
-     * Provides build_id values that are not a UUIDv7, the version Collectives generates.
+     * Provides static_site_id and build_id values that are not a UUIDv7, the version Collectives generates.
      *
      * @return array<string, array{string, mixed}> field name and invalid value, keyed by case name
      */
-    public static function provideInvalidBuildIds(): array
+    public static function provideInvalidIds(): array
     {
-        return [
-            'build_id: not a UUID' => ['build_id', 'build-1'],
-            'build_id: a UUIDv4' => ['build_id', '4b6c1e2a-9d3f-4a7b-8c5e-2f1d0a9b8c7d'],
-            'build_id: not a string' => ['build_id', 42],
-        ];
+        $out = [];
+        foreach (['static_site_id', 'build_id'] as $field) {
+            $out[$field . ': not a UUID'] = [$field, '1234-5678'];
+            $out[$field . ': a UUIDv4'] = [$field, '4b6c1e2a-9d3f-4a7b-8c5e-2f1d0a9b8c7d'];
+            $out[$field . ': the nil UUID'] = [$field, '00000000-0000-0000-0000-000000000000'];
+            $out[$field . ': not a string'] = [$field, 42];
+        }
+
+        return $out;
     }
 
-    #[DataProvider('provideInvalidBuildIds')]
-    public function testABuildIdThatIsNotAUuidV7IsABadRequest(string $field, mixed $value): void
+    #[DataProvider('provideInvalidIds')]
+    public function testAnIdThatIsNotAUuidV7IsABadRequest(string $field, mixed $value): void
     {
         $client = static::createClient();
         self::postSite($client, [...self::PAYLOAD, $field => $value], self::AUTH);
 
         self::assertResponseStatusCodeSame(400);
         self::assertJsonStringEqualsJsonString(
-            '{"status":"invalid","error":"build_id must be a UUIDv7"}',
+            sprintf('{"data":{"error_message":"%s must be a UUIDv7"}}', $field),
             (string) $client->getResponse()->getContent(),
         );
         self::assertCount(0, self::sentToBuilds());
@@ -300,7 +288,7 @@ final class StaticSiteControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(400);
         self::assertJsonStringEqualsJsonString(
-            '{"status":"invalid","error":"missing required fields"}',
+            '{"data":{"error_message":"data must be an object"}}',
             (string) $client->getResponse()->getContent(),
         );
         self::assertCount(0, self::sentToBuilds());
@@ -356,7 +344,7 @@ final class StaticSiteControllerTest extends WebTestCase
             server: ['CONTENT_TYPE' => 'application/json'],
             content: json_encode(['data' => self::PAYLOAD], JSON_THROW_ON_ERROR),
         );
-        $response = (new StaticSiteController($bus, new NullLogger(), $entityManager))($request);
+        $response = (new StaticSiteController($bus, new NullLogger(), $entityManager, 600))->create($request);
 
         self::assertSame(503, $response->getStatusCode());
         // Through the connection: a failed transaction closes the entity manager.
@@ -573,7 +561,7 @@ final class StaticSiteControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(400);
         self::assertJsonStringEqualsJsonString(
-            '{"status":"invalid","error":"missing required fields"}',
+            '{"data":{"error_message":"missing required fields"}}',
             (string) $client->getResponse()->getContent(),
         );
     }
@@ -589,7 +577,7 @@ final class StaticSiteControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(400);
         self::assertResponseHeaderSame('content-type', 'application/json');
         self::assertJsonStringEqualsJsonString(
-            '{"status":"invalid","error":"missing required fields"}',
+            '{"data":{"error_message":"missing required fields"}}',
             (string) $client->getResponse()->getContent(),
         );
 
@@ -674,7 +662,6 @@ final class StaticSiteControllerTest extends WebTestCase
 
     public function testMalformedJsonWithATokenIsABadRequest(): void
     {
-        // toArray() throws HttpFoundation's JsonException, a RequestExceptionInterface, which the kernel answers with 400.
         $client = static::createClient();
         $client->request(
             'POST',
@@ -684,5 +671,304 @@ final class StaticSiteControllerTest extends WebTestCase
         );
 
         self::assertResponseStatusCodeSame(400);
+        self::assertJsonStringEqualsJsonString(
+            '{"data":{"error_message":"body is not valid JSON"}}',
+            (string) $client->getResponse()->getContent(),
+        );
+    }
+
+    // --- update and delete --------------------------------------------------
+
+    /** The build of an update or delete, a UUIDv7 other than PAYLOAD's. */
+    private const NEXT_BUILD_ID = '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5c';
+
+    /** A complete, valid update payload. */
+    private const UPDATE = [
+        'build_id' => self::NEXT_BUILD_ID,
+        'title' => 'Some Collective, revised',
+        'content_download_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+    ];
+
+    /** A complete, valid delete payload. */
+    private const DELETE = [
+        'callback_status_url' => 'https://cloud.somenextcloud.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+    ];
+
+    /** The path of PAYLOAD's site. */
+    private const SITE_PATH = '/static-sites/' . self::PAYLOAD['static_site_id'];
+
+    /**
+     * Creates PAYLOAD's site and sets $status on it, as publish-worker would after its first build.
+     *
+     * @param KernelBrowser $client The test client.
+     * @param StaticSiteStatus $status The status to leave the site in.
+     * @return void
+     */
+    private static function givenAStoredSite(KernelBrowser $client, StaticSiteStatus $status = StaticSiteStatus::Published): void
+    {
+        self::postSite($client, self::PAYLOAD, self::AUTH);
+        self::assertResponseStatusCodeSame(202);
+
+        self::connection()->executeStatement('UPDATE static_site SET status = ?', [$status->value]);
+    }
+
+    /**
+     * Returns the test database connection.
+     *
+     * @return \Doctrine\DBAL\Connection the connection
+     */
+    private static function connection(): \Doctrine\DBAL\Connection
+    {
+        return static::getContainer()->get(EntityManagerInterface::class)->getConnection();
+    }
+
+    public function testAnUpdateRebuildsTheSite(): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client);
+
+        $client->jsonRequest('PATCH', self::SITE_PATH, ['data' => self::UPDATE], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+        $build = self::onlySentBuild();
+        self::assertSame(BuildOperation::Update, $build->operation);
+        self::assertSame(self::PAYLOAD['static_site_id'], $build->static_site_id);
+        self::assertSame(self::NEXT_BUILD_ID, $build->build_id);
+        self::assertSame('some_collective', $build->slug);
+        self::assertSame('Some Collective, revised', $build->title);
+
+        $site = self::storedSite(self::PAYLOAD['static_site_id']);
+        self::assertNotNull($site);
+        self::assertSame(StaticSiteStatus::Pending, $site->status);
+        self::assertSame(self::NEXT_BUILD_ID, $site->buildId?->toRfc4122());
+    }
+
+    /** Changing the slug is not part of an update, so a slug in the request changes nothing. */
+    public function testAnUpdateKeepsTheSlugOfTheSite(): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client);
+
+        $client->jsonRequest('PATCH', self::SITE_PATH, ['data' => [...self::UPDATE, 'slug' => 'renamed']], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+        self::assertSame('some_collective', self::onlySentBuild()->slug);
+        self::assertSame('some_collective', self::storedSite(self::PAYLOAD['static_site_id'])?->slug);
+    }
+
+    /**
+     * Provides build_ids that do not sort after the stored one, PAYLOAD's.
+     *
+     * @return array<string, array{string}> the build_id, keyed by case name
+     */
+    public static function provideBuildIdsNotNewer(): array
+    {
+        return [
+            'the same build_id' => [self::PAYLOAD['build_id']],
+            'an older build_id' => ['0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5a'],
+        ];
+    }
+
+    /** A repeated or stale update must not rebuild the site or replace its build_id. */
+    #[DataProvider('provideBuildIdsNotNewer')]
+    public function testAnUpdateWhoseBuildIdIsNotNewerIsAConflict(string $buildId): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client);
+
+        $client->jsonRequest('PATCH', self::SITE_PATH, ['data' => [...self::UPDATE, 'build_id' => $buildId]], self::AUTH);
+
+        self::assertConflict($client, 'build_id not newer');
+        self::assertSame(self::PAYLOAD['build_id'], self::storedSite(self::PAYLOAD['static_site_id'])?->buildId?->toRfc4122());
+    }
+
+    /**
+     * Provides an update and a delete request for the cases both answer alike.
+     *
+     * @return array<string, array{string, array<string, string>}> method and payload, keyed by operation
+     */
+    public static function operations(): array
+    {
+        return [
+            'update' => ['PATCH', self::UPDATE],
+            'delete' => ['DELETE', self::DELETE],
+        ];
+    }
+
+    /** @param array<string, string> $payload The request fields. */
+    #[DataProvider('operations')]
+    public function testAnUnknownSiteIsNotFound(string $method, array $payload): void
+    {
+        $client = static::createClient();
+
+        $client->jsonRequest($method, self::SITE_PATH, ['data' => $payload], self::AUTH);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertJsonStringEqualsJsonString(
+            '{"data":{"error_message":"static site not found"}}',
+            (string) $client->getResponse()->getContent(),
+        );
+        self::assertCount(0, self::sentToBuilds());
+    }
+
+    /** @param array<string, string> $payload The request fields. */
+    #[DataProvider('operations')]
+    public function testAPathIdThatIsNotAUuidV7IsNotFound(string $method, array $payload): void
+    {
+        $client = static::createClient();
+
+        foreach (['not-a-uuid', '4b6c1e2a-9d3f-4a7b-8c5e-2f1d0a9b8c7d'] as $id) {
+            $client->jsonRequest($method, '/static-sites/' . $id, ['data' => $payload], self::AUTH);
+
+            self::assertResponseStatusCodeSame(404);
+            self::assertJsonStringEqualsJsonString(
+                '{"data":{"error_message":"static site not found"}}',
+                (string) $client->getResponse()->getContent(),
+            );
+        }
+    }
+
+    /**
+     * One operation per site: a second one while the first is pending is refused.
+     *
+     * @param array<string, string> $payload The request fields.
+     */
+    #[DataProvider('operations')]
+    public function testASitePendingAnotherOperationIsAConflict(string $method, array $payload): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client, StaticSiteStatus::Pending);
+
+        $client->jsonRequest($method, self::SITE_PATH, ['data' => $payload], self::AUTH);
+
+        self::assertConflict($client, 'operation in progress');
+    }
+
+    /**
+     * A site pending for longer than PENDING_TIMEOUT_SECONDS counts as stuck, so a new operation may replace it.
+     *
+     * @param array<string, string> $payload The request fields.
+     */
+    #[DataProvider('operations')]
+    public function testASiteStuckInPendingAcceptsANewOperation(string $method, array $payload): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client, StaticSiteStatus::Pending);
+        self::connection()->executeStatement("UPDATE static_site SET updated_at = now() - interval '1 day'");
+
+        $client->jsonRequest($method, self::SITE_PATH, ['data' => $payload], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+    }
+
+    /**
+     * A site whose last operation failed takes a new one.
+     *
+     * @param array<string, string> $payload The request fields.
+     */
+    #[DataProvider('operations')]
+    public function testAFailedSiteAcceptsANewOperation(string $method, array $payload): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client, StaticSiteStatus::Failed);
+
+        $client->jsonRequest($method, self::SITE_PATH, ['data' => $payload], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+    }
+
+    /**
+     * Provides an update or a delete missing one required field.
+     *
+     * @return array<string, array{string, array<string, string>}> method and payload, keyed by the missing field
+     */
+    public static function incompleteOperations(): array
+    {
+        $cases = [];
+        foreach (['update' => ['PATCH', self::UPDATE], 'delete' => ['DELETE', self::DELETE]] as $name => [$method, $payload]) {
+            foreach (array_keys($payload) as $field) {
+                $incomplete = $payload;
+                unset($incomplete[$field]);
+                $cases[$name . ' without ' . $field] = [$method, $incomplete];
+            }
+        }
+
+        return $cases;
+    }
+
+    /** @param array<string, string> $payload The request fields. */
+    #[DataProvider('incompleteOperations')]
+    public function testAnOperationMissingAFieldIsABadRequest(string $method, array $payload): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client);
+
+        $client->jsonRequest($method, self::SITE_PATH, ['data' => $payload], self::AUTH);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertCount(0, self::sentToBuilds());
+    }
+
+    /** A delete builds nothing, so it sends no build_id and leaves the stored one as it is. */
+    public function testADeleteMarksTheSitePendingAndSendsNoContent(): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client);
+
+        $client->jsonRequest('DELETE', self::SITE_PATH, ['data' => self::DELETE], self::AUTH);
+
+        self::assertResponseStatusCodeSame(202);
+        $build = self::onlySentBuild();
+        self::assertSame(BuildOperation::Delete, $build->operation);
+        self::assertSame('some_collective', $build->slug);
+        self::assertNull($build->build_id);
+        self::assertNull($build->title);
+        self::assertNull($build->content_download_url);
+
+        $site = self::storedSite(self::PAYLOAD['static_site_id']);
+        self::assertNotNull($site, 'publish-worker deletes the entry, not publish');
+        self::assertSame(StaticSiteStatus::Pending, $site->status);
+        self::assertSame(self::PAYLOAD['build_id'], $site->buildId?->toRfc4122());
+    }
+
+    /**
+     * A failed dispatch puts the site back as it was, so it is not left pending for a job nobody runs.
+     *
+     * @param array<string, string> $payload The request fields.
+     */
+    #[DataProvider('operations')]
+    public function testAFailedDispatchLeavesTheSiteAsItWas(string $method, array $payload): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client);
+        $entityManager = static::getContainer()->get(EntityManagerInterface::class);
+        $entityManager->clear();
+
+        $bus = $this->createStub(MessageBusInterface::class);
+        $bus->method('dispatch')->willThrowException(new TransportException('connection refused'));
+        $controller = new StaticSiteController($bus, new NullLogger(), $entityManager, 600);
+
+        $request = Request::create(
+            self::SITE_PATH,
+            $method,
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['data' => $payload], JSON_THROW_ON_ERROR),
+        );
+        $id = self::PAYLOAD['static_site_id'];
+        $response = $method === 'PATCH' ? $controller->update($request, $id) : $controller->delete($request, $id);
+
+        self::assertSame(503, $response->getStatusCode());
+        $row = self::connection()->fetchAssociative('SELECT slug, status, build_id FROM static_site');
+        self::assertSame(['slug' => 'some_collective', 'status' => 'published', 'build_id' => self::PAYLOAD['build_id']], $row);
+    }
+
+    public function testAnUpdateWithoutATokenIsUnauthorized(): void
+    {
+        $client = static::createClient();
+
+        $client->jsonRequest('PATCH', self::SITE_PATH, ['data' => self::UPDATE]);
+
+        self::assertResponseStatusCodeSame(401);
     }
 }

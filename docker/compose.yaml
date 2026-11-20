@@ -31,6 +31,7 @@ services:
       AMQP_HEARTBEAT: "60"
       PUBLISH_API_TOKEN: "${PUBLISH_API_TOKEN:?set PUBLISH_API_TOKEN in .env}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
+      PENDING_TIMEOUT_SECONDS: "${PENDING_TIMEOUT_SECONDS:-600}"
       SENTRY_DSN: "${PUBLISH_SENTRY_DSN:-}"
       DATABASE_URL: "postgresql://${POSTGRES_USER:-publish}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/publish?serverVersion=${POSTGRES_VERSION:-18}&charset=utf8"
     volumes:

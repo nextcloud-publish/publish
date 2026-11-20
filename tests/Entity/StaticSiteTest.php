@@ -85,4 +85,61 @@ final class StaticSiteTest extends KernelTestCase
         $this->expectException(UniqueConstraintViolationException::class);
         $this->entityManager->flush();
     }
+
+    public function testUpdatedAtIsSetOnInsertAndOnUpdate(): void
+    {
+        $site = new StaticSite(Uuid::v7(), 'some_collective', StaticSiteStatus::Published, Uuid::v7());
+        $this->entityManager->persist($site);
+        $this->entityManager->flush();
+        $this->entityManager->getConnection()->executeStatement("UPDATE static_site SET updated_at = now() - interval '1 day'");
+        $this->entityManager->refresh($site);
+        $before = $site->updatedAt;
+
+        $site->startOperation(Uuid::v7());
+        $this->entityManager->flush();
+
+        self::assertGreaterThan($before, $site->updatedAt);
+    }
+
+    public function testStartOperationWithoutABuildIdKeepsTheStoredOne(): void
+    {
+        $buildId = Uuid::v7();
+        $site = new StaticSite(Uuid::v7(), 'some_collective', StaticSiteStatus::Published, $buildId);
+
+        $site->startOperation();
+
+        self::assertSame(StaticSiteStatus::Pending, $site->status);
+        self::assertSame($buildId, $site->buildId);
+    }
+
+    public function testUndoOperationPutsBackWhatStartOperationReplaced(): void
+    {
+        $buildId = Uuid::v7();
+        $site = new StaticSite(Uuid::v7(), 'some_collective', StaticSiteStatus::Published, $buildId);
+
+        $site->startOperation(Uuid::v7());
+        $site->undoOperation();
+
+        self::assertSame(StaticSiteStatus::Published, $site->status);
+        self::assertSame($buildId, $site->buildId);
+    }
+
+    public function testUndoOperationWithoutAnOperationIsALogicError(): void
+    {
+        $site = new StaticSite(Uuid::v7(), 'some_collective', StaticSiteStatus::Published);
+
+        $this->expectException(\LogicException::class);
+        $site->undoOperation();
+    }
+
+    public function testOnlyARecentlyWrittenPendingSiteIsBusy(): void
+    {
+        $now = new \DateTimeImmutable();
+        $pending = new StaticSite(Uuid::v7(), 'some_collective', StaticSiteStatus::Pending);
+        $published = new StaticSite(Uuid::v7(), 'other_collective', StaticSiteStatus::Published);
+
+        self::assertTrue($pending->isBusy($now, 600));
+        self::assertFalse($pending->isBusy($now->modify('+601 seconds'), 600), 'pending longer than the timeout counts as stuck');
+        self::assertFalse($published->isBusy($now, 600));
+    }
 }

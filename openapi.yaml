@@ -93,26 +93,9 @@ paths:
                   $ref: '#/components/schemas/StaticSiteRequest'
       responses:
         '202':
-          description: Queued.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status]
-                properties:
-                  status:
-                    enum: ['enqueued']
+          $ref: '#/components/responses/Enqueued'
         '400':
-          description: |
-            A field is missing or invalid (`Invalid`), or the body is not JSON. The latter is
-            Symfony's error: `Problem` when the request accepts JSON, an HTML page otherwise.
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/Invalid'
-                  - $ref: '#/components/schemas/Problem'
-            text/html: {}
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
@@ -124,33 +107,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/Conflict'
         '503':
-          description: |
-            The broker could not be reached or did not confirm the message. Nothing was stored or
-            queued.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status, error]
-                properties:
-                  status:
-                    enum: ['error']
-                  error:
-                    enum: ['could not enqueue build']
+          $ref: '#/components/responses/NotEnqueued'
       callbacks:
         buildStatus:
           '{$request.body#/data/callback_status_url}':
             patch:
-              summary: Report the outcome of a build
+              summary: Report the outcome of an operation
               description: |
-                publish-worker sends this once a build is published, or once it failed for good.
-                Delivery is at-least-once: dedupe on `(callback_status_url, status)` and treat a
-                status as final.
+                publish-worker sends this once a create or update is published, once a delete is
+                done, or once any of them failed for good. Delivery is at-least-once: dedupe on
+                `(callback_status_url, status)` and treat a status as final.
 
-                Before `failed` is sent, the build leaves nothing behind: its published site and its
-                `static_site` entry are removed. The client can POST the site again, with a new
-                `build_id`. Only if publish-worker cannot reach the database does the entry stay;
-                the new POST then gets a `409` until an operator removes it.
+                Before `failed` is sent for a create, the build leaves nothing behind: its published
+                site and its `static_site` entry are removed, and the client can POST the site again
+                with a new `build_id`. Only if publish-worker cannot reach the database does the
+                entry stay; the new POST then gets a `409` until an operator removes it. A failed
+                update or delete keeps the published site, and the entry stays as `failed`.
               security: []
               parameters:
                 - name: OCS-APIRequest
@@ -166,6 +138,7 @@ paths:
                     schema:
                       oneOf:
                         - $ref: '#/components/schemas/BuildPublished'
+                        - $ref: '#/components/schemas/SiteDeleted'
                         - $ref: '#/components/schemas/BuildFailed'
               responses:
                 '2XX':
@@ -179,6 +152,90 @@ paths:
                 '5XX':
                   description: Retried, so the whole build runs again.
 
+  /static-sites/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The site's `static_site_id`, in lower case. Anything else is a `404`.
+        schema:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    patch:
+      tags: [Static sites]
+      operationId: updateStaticSite
+      summary: Rebuild a static site from new content
+      description: |
+        Marks the site `pending` with the new `build_id` and queues its build; the published site
+        stays until the new one replaces it, under the same `slug`. One operation per site: while the last
+        one is pending the answer is `409`, unless it has been pending for longer than
+        `PENDING_TIMEOUT_SECONDS`. The callback reports the outcome, as for a create.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  $ref: '#/components/schemas/StaticSiteUpdateRequest'
+      responses:
+        '202':
+          $ref: '#/components/responses/Enqueued'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            The site's last operation is still pending, or the `build_id` does not sort after the
+            stored one. Nothing was changed or queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conflict'
+        '503':
+          $ref: '#/components/responses/NotEnqueued'
+    delete:
+      tags: [Static sites]
+      operationId: deleteStaticSite
+      summary: Remove a static site
+      description: |
+        Marks the site `pending` and queues its removal; the site keeps its stored `build_id`.
+        publish-worker removes the published site, then the entry, then reports `deleted` to
+        `callback_status_url`. One operation per site, as for an update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  $ref: '#/components/schemas/StaticSiteDeleteRequest'
+      responses:
+        '202':
+          $ref: '#/components/responses/Enqueued'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The site's last operation is still pending. Nothing was changed or queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conflict'
+        '503':
+          $ref: '#/components/responses/NotEnqueued'
+
 components:
   securitySchemes:
     bearer:
@@ -189,6 +246,48 @@ components:
         token may use `A-Z a-z 0-9 - _ + ~ / .` with optional trailing `=`.
 
   responses:
+    Enqueued:
+      description: Queued. The answer has no body.
+
+    BadRequest:
+      description: A field is missing or invalid, or the body is not valid JSON.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Invalid'
+
+    NotFound:
+      description: No site has this id.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data]
+            properties:
+              data:
+                type: object
+                required: [error_message]
+                properties:
+                  error_message:
+                    enum: ['static site not found']
+
+    NotEnqueued:
+      description: |
+        The database or the broker failed, or the broker did not confirm the message. The site is
+        left as it was before the request, and nothing was queued.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data]
+            properties:
+              data:
+                type: object
+                required: [error_message]
+                properties:
+                  error_message:
+                    enum: ['could not enqueue build']
+
     Unauthorized:
       description: |
         No token, or a token that does not match. Rely on the status code: without a token the
@@ -232,10 +331,9 @@ components:
         static_site_id:
           type: string
           format: uuid
-          pattern: '^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$'
+          pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-7[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$'
           description: |
-            Identifies the site; chosen by the client. Stored and used in lower case, and the site's
-            directory under the published root.
+            Identifies the site; a UUIDv7 chosen by the client. Stored and used in lower case.
           examples: ['0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70']
         build_id:
           type: string
@@ -248,8 +346,7 @@ components:
         slug:
           allOf: [$ref: '#/components/schemas/SafeId']
           description: |
-            The directory the site is published under, inside `static_site_id`. Unique across all
-            sites.
+            The directory the site is published under, and its URL path. Unique across all sites.
           examples: [some_collective]
         title:
           type: string
@@ -272,25 +369,51 @@ components:
             An invalid value is not a `400`: the build ends with a `failed` callback.
           examples: [{ theme: colorful }]
 
+    StaticSiteUpdateRequest:
+      type: object
+      required: [build_id, title, content_download_url, callback_status_url]
+      properties:
+        build_id:
+          $ref: '#/components/schemas/StaticSiteRequest/properties/build_id'
+        title:
+          $ref: '#/components/schemas/StaticSiteRequest/properties/title'
+        content_download_url:
+          $ref: '#/components/schemas/StaticSiteRequest/properties/content_download_url'
+        callback_status_url:
+          $ref: '#/components/schemas/StaticSiteRequest/properties/callback_status_url'
+        render_options:
+          $ref: '#/components/schemas/StaticSiteRequest/properties/render_options'
+
+    StaticSiteDeleteRequest:
+      type: object
+      required: [callback_status_url]
+      properties:
+        callback_status_url:
+          $ref: '#/components/schemas/StaticSiteRequest/properties/callback_status_url'
+
     Invalid:
       type: object
-      required: [status, error]
+      required: [data]
       properties:
-        status:
-          enum: ['invalid']
-        error:
-          type: string
-          description: Which check failed.
-          examples: ['slug must match [A-Za-z0-9_-]{1,128}']
+        data:
+          type: object
+          required: [error_message]
+          properties:
+            error_message:
+              type: string
+              description: Which check failed.
+              examples: ['slug must match [A-Za-z0-9_-]{1,128}']
 
     Conflict:
       type: object
-      required: [status, error]
+      required: [data]
       properties:
-        status:
-          enum: ['conflict']
-        error:
-          enum: ['static site already exists', 'slug already taken']
+        data:
+          type: object
+          required: [error_message]
+          properties:
+            error_message:
+              enum: ['static site already exists', 'slug already taken', 'operation in progress', 'build_id not newer']
 
     Problem:
       type: object
@@ -319,7 +442,17 @@ components:
             publish_url:
               type: string
               format: uri
-              examples: ['https://sites.example.org/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70/some_collective/']
+              examples: ['https://sites.example.org/some_collective/']
+
+    SiteDeleted:
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          enum: ['deleted']
+        data:
+          type: object
+          maxProperties: 0
 
     BuildFailed:
       type: object

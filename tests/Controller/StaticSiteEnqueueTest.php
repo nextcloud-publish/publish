@@ -6,6 +6,7 @@ namespace App\Tests\Controller;
 
 use App\Controller\StaticSiteController;
 use App\Message\BuildJob;
+use App\Message\BuildOperation;
 use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Handler\TestHandler;
 use Monolog\Level;
@@ -69,11 +70,11 @@ final class StaticSiteEnqueueTest extends TestCase
      */
     private function controller(MessageBusInterface $bus): StaticSiteController
     {
-        return new StaticSiteController($bus, new Logger('app', [$this->logged]), self::emptyEntityManager());
+        return new StaticSiteController($bus, new Logger('app', [$this->logged]), self::emptyEntityManager(), 600);
     }
 
     /**
-     * Returns an entity manager that finds no site and runs a transaction's callback, rethrowing what it throws.
+     * Returns an entity manager that finds no site and stores nothing.
      * The database part is covered through the kernel in StaticSiteControllerTest.
      *
      * @return EntityManagerInterface the stub
@@ -82,7 +83,6 @@ final class StaticSiteEnqueueTest extends TestCase
     {
         $entityManager = self::createStub(EntityManagerInterface::class);
         $entityManager->method('find')->willReturn(null);
-        $entityManager->method('wrapInTransaction')->willReturnCallback(static fn (callable $func): mixed => $func());
 
         return $entityManager;
     }
@@ -94,6 +94,7 @@ final class StaticSiteEnqueueTest extends TestCase
             ->method('dispatch')
             ->with($this->callback(function (BuildJob $build): bool {
                 self::assertSame(self::PAYLOAD['static_site_id'], $build->static_site_id);
+                self::assertSame(BuildOperation::Create, $build->operation);
                 self::assertSame(self::PAYLOAD['slug'], $build->slug);
                 self::assertSame(self::PAYLOAD['content_download_url'], $build->content_download_url);
                 self::assertSame(self::PAYLOAD['callback_status_url'], $build->callback_status_url);
@@ -114,13 +115,10 @@ final class StaticSiteEnqueueTest extends TestCase
             ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
 
         $controller = $this->controller($bus);
-        $response = $controller(self::request(self::PAYLOAD));
+        $response = $controller->create(self::request(self::PAYLOAD));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
-        self::assertJsonStringEqualsJsonString(
-            '{"status":"enqueued"}',
-            (string) $response->getContent(),
-        );
+        self::assertSame('', (string) $response->getContent());
         self::assertTrue($this->logged->hasInfoThatContains('Build enqueued'));
     }
 
@@ -142,7 +140,7 @@ final class StaticSiteEnqueueTest extends TestCase
         ];
 
         $controller = self::controller($bus);
-        $response = $controller(self::request($payload));
+        $response = $controller->create(self::request($payload));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
     }
@@ -173,7 +171,7 @@ final class StaticSiteEnqueueTest extends TestCase
             ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
 
         $controller = self::controller($bus);
-        $response = $controller(self::request([...self::PAYLOAD, 'render_options' => $renderOptions]));
+        $response = $controller->create(self::request([...self::PAYLOAD, 'render_options' => $renderOptions]));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
     }
@@ -192,7 +190,7 @@ final class StaticSiteEnqueueTest extends TestCase
             ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
 
         $controller = self::controller($bus);
-        $response = $controller(self::request([...self::PAYLOAD, 'render_options' => new \stdClass()]));
+        $response = $controller->create(self::request([...self::PAYLOAD, 'render_options' => new \stdClass()]));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
     }
@@ -205,11 +203,11 @@ final class StaticSiteEnqueueTest extends TestCase
             ->willThrowException(new TransportException('connection refused'));
 
         $controller = $this->controller($bus);
-        $response = $controller(self::request(self::PAYLOAD));
+        $response = $controller->create(self::request(self::PAYLOAD));
 
         self::assertSame(Response::HTTP_SERVICE_UNAVAILABLE, $response->getStatusCode());
         self::assertJsonStringEqualsJsonString(
-            '{"status":"error","error":"could not enqueue build"}',
+            '{"data":{"error_message":"could not enqueue build"}}',
             (string) $response->getContent(),
         );
 
@@ -231,11 +229,11 @@ final class StaticSiteEnqueueTest extends TestCase
         unset($payload['slug']);
 
         $controller = $this->controller($bus);
-        $response = $controller(self::request($payload));
+        $response = $controller->create(self::request($payload));
 
         self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
         self::assertJsonStringEqualsJsonString(
-            '{"status":"invalid","error":"missing required fields"}',
+            '{"data":{"error_message":"missing required fields"}}',
             (string) $response->getContent(),
         );
         self::assertTrue($this->logged->hasWarningThatContains('Build request rejected'));
