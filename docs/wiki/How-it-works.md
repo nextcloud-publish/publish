@@ -6,23 +6,23 @@ share.
 ```mermaid
 flowchart LR
     nextcloud[Nextcloud] -- "POST /static-sites" --> proxy[host proxy]
-    visitors[visitors] -- "GET /pages/" --> proxy
+    visitors[visitors] -- "GET /sites/" --> proxy
     proxy -- "/" --> gateway["nginx-fpm-gateway (nginx)"]
     gateway --> publish["publish (PHP-FPM)"]
     publish --> rabbitmq[RabbitMQ]
     rabbitmq --> worker["publish-worker × n"]
     worker -- "content download, status callback" --> nextcloud
-    worker -- writes --> pages[("pages/")]
-    proxy -- "/pages/" --> pages
+    worker -- writes --> sites[("sites/")]
+    proxy -- "/sites/" --> sites
 ```
 
 | Component | Runs as | Does |
 | --- | --- | --- |
-| host proxy | nginx or any proxy on the host | Terminates TLS. Forwards `/` to `nginx-fpm-gateway`, serves the published sites at `/pages/` |
+| host proxy | nginx or any proxy on the host | Terminates TLS. Forwards `/` to `nginx-fpm-gateway`, serves the published sites at `/sites/` |
 | `nginx-fpm-gateway` | nginx container | Passes every request to PHP-FPM in `publish` over FastCGI |
 | `publish` | PHP-FPM container | Checks the bearer token and the request, puts a `BuildJob` on `q.builds`, answers `202` |
 | RabbitMQ | `rabbitmq:4` container | Holds `q.builds`, and the `delays` exchange for the worker's retry |
-| `publish-worker` | PHP CLI containers, `PUBLISH_WORKER_REPLICAS` of them, default 2 | Takes one job at a time: downloads, renders, swaps the site into `pages/`, calls back |
+| `publish-worker` | PHP CLI containers, `PUBLISH_WORKER_REPLICAS` of them, default 2 | Takes one job at a time: downloads, renders, swaps the site into `sites/`, calls back |
 
 ## Authentication
 
@@ -111,9 +111,9 @@ publish answers `202` only after the broker confirms the message.
 
 publish-worker takes one message at a time: it downloads the archive, extracts it, renders the pages
 with [ssg-library](https://github.com/nextcloud-publish/ssg-library), and swaps the site into
-`pages/<slug>/`. Then it PATCHes the outcome to `callback_status_url`.
+`sites/<slug>/`. Then it PATCHes the outcome to `callback_status_url`.
 
-A delete builds nothing: publish-worker removes `pages/<slug>/`, then the entry, then reports
+A delete builds nothing: publish-worker removes `sites/<slug>/`, then the entry, then reports
 `deleted`.
 
 | Outcome | What happens |

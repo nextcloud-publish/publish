@@ -3,7 +3,7 @@
 </p>
 
 Publish builds static websites from Nextcloud Collectives. Nextcloud sends a build request to the
-publish API; publish-worker downloads the collective's content, renders the site into `pages/` and
+publish API; publish-worker downloads the collective's content, renders the site into `sites/` and
 reports the result back to Nextcloud.
 
 ## Technology
@@ -65,8 +65,8 @@ docker/
   dev/compose.yaml            dev stack: nginx-fpm-gateway + publish + RabbitMQ + publish-worker + mock;
                               joins the external network collectives-dev
   dev/.env.example            host ids and TZ for the dev stack; copy to dev/.env
-  dev/collectives-api-mock/   nginx: content archives and status callbacks on :8082, pages/ on :8081
-  dev/pages/                  bind mount the worker publishes into (gitignored)
+  dev/collectives-api-mock/   nginx: content archives and status callbacks on :8082, sites/ on :8081
+  dev/sites/                  bind mount the worker publishes into (gitignored)
   dev/builds/                 bind mount for the worker's build scratch (gitignored)
   dev/rabbitmq/               definitions.json (topology) + rabbitmq.conf
 ```

@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.env`, generated as
-`.env.example` describes.
+`.env.example` describes. Stop the stack, rename `pages/` to `sites/`, and point the host proxy at
+it under `/sites/` with `PUBLISH_BASE_URL` to match, as `Deploy-publish` in the wiki shows.
 
 ### Added
 
@@ -50,7 +51,10 @@ Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.en
 - publish commits the `static_site` entry before it dispatches the build, so publish-worker
   always finds it; a failed dispatch undoes the write and answers `503`.
 - **Breaking:** a site's `publish_url` is `<PUBLISH_BASE_URL>/<slug>/`, without the
-  `static_site_id`. Needs a publish-worker release that publishes sites at `PAGES_DIR/<slug>/`.
+  `static_site_id`. Needs a publish-worker release that publishes sites at `SITES_DIR/<slug>/`.
+- **Breaking:** the published sites are in `sites/` instead of `pages/`, mounted at
+  `/publish-worker/var/sites`, and the sample serves them at `/sites/`; in the dev stack
+  `docker/dev/sites/`. Needs the publish-worker release that reads `SITES_DIR`.
 
 ## [0.5.0] - 2026-11-15
 

@@ -8,8 +8,8 @@ repos are mounted into their containers, so code changes need no rebuild.
 nginx-fpm-gateway      nginx on :8080, passes http request to publish over FastCGI
 publish                PHP-FPM, the API; sends each build to RabbitMQ
 rabbitmq               queue q.builds; AMQP on :5672, management UI on :15672
-publish-worker x2      takes builds from q.builds, writes the sites to docker/dev/pages/
-collectives-api-mock   nginx: content archives and status callbacks on :8082, pages/ on :8081
+publish-worker x2      takes builds from q.builds, writes the sites to docker/dev/sites/
+collectives-api-mock   nginx: content archives and status callbacks on :8082, sites/ on :8081
 ```
 
 ## Setup
@@ -72,7 +72,7 @@ curl -I http://127.0.0.1:8081/demo-site/
 docker compose -f docker/dev/compose.yaml logs collectives-api-mock | grep CALLBACK
 
 # The published files
-ls -R docker/dev/pages/demo-site/
+ls -R docker/dev/sites/demo-site/
 ```
 
 A successful build shows this callback:
@@ -132,7 +132,7 @@ To build from Collectives in a local Nextcloud instead of `collectives-api-mock`
 | 5432 | Postgres, `publish` / `secret`, for `bin/console` and the tests on the host; `POSTGRES_PORT` in `docker/dev/.env` changes it |
 | 5672 | RabbitMQ AMQP, for a worker running on the host |
 | 15672 | RabbitMQ management UI, `publish` / `secret` |
-| 8081 | the published sites, from `docker/dev/pages/` |
+| 8081 | the published sites, from `docker/dev/sites/` |
 | 8082 | the Nextcloud mock: content archives under `/content/`, status callbacks under `/status/` |
 
 All ports are bound to `127.0.0.1`. All services run in the time zone `TZ`, default
@@ -182,7 +182,7 @@ explains the log messages.
 - `APP_DEBUG` is on, so an error in publish answers with Symfony's error page and stack trace.
 - The management UI on port 15672 shows whether a job is waiting on `q.builds`, and the
   `delays` exchange while a build waits for its retry.
-- `docker/dev/pages/` holds the published sites, `docker/dev/builds/` a running build.
+- `docker/dev/sites/` holds the published sites, `docker/dev/builds/` a running build.
 
 ## Database
 

@@ -5,7 +5,7 @@ that host that terminates TLS.
 
 - Docker with [Compose v2](https://docs.docker.com/compose/install/).
 - A reverse proxy on the host, such as nginx, with a TLS certificate for one host name. It serves
-  the API at `/` and the published sites at `/pages/`; step 4 has an
+  the API at `/` and the published sites at `/sites/`; step 4 has an
   [nginx example](#4-configure-the-host-proxy).
 - Optional: a GlitchTip or Sentry project per service, and outbound access to it.
 
@@ -26,14 +26,14 @@ wget -P rabbitmq $base/rabbitmq/rabbitmq.conf $base/rabbitmq/definitions.example
 
 All later commands run in this folder.
 
-`pages/` holds the published sites, `logs/` the log files. Both app containers run as uid `10001`:
+`sites/` holds the published sites, `logs/` the log files. Both app containers run as uid `10001`:
 
 ```bash
-mkdir -p pages logs/publish logs/publish-worker
+mkdir -p sites logs/publish logs/publish-worker
 ```
 
 ```bash
-sudo chown -R 10001:10001 pages logs
+sudo chown -R 10001:10001 sites logs
 ```
 
 ## 2. Fill in `.env`
@@ -81,7 +81,7 @@ The hash is salted, so every run prints a different one; each works.
 
 ## 4. Configure the host proxy
 
-The API goes to `nginx-fpm-gateway` on `127.0.0.1:PUBLISH_PORT`, the published sites are files in `pages/`.
+The API goes to `nginx-fpm-gateway` on `127.0.0.1:PUBLISH_PORT`, the published sites are files in `sites/`.
 nginx example; replace `publish.example.org`, the certificate paths and `/path/to/publish`:
 
 ```nginx
@@ -113,8 +113,8 @@ server {
   proxy_hide_header Referrer-Policy;
   add_header Referrer-Policy "same-origin" always;
 
-  location /pages/ {
-    alias /path/to/publish/pages/;
+  location /sites/ {
+    alias /path/to/publish/sites/;
   }
 
   # Only the endpoints of publish; scans such as /wp-admin never reach the app
@@ -131,7 +131,7 @@ server {
 nginx passes the `Authorization` header on unchanged; another proxy must do the same. A new route
 in publish needs a new entry in the endpoints `location`.
 
-The proxy's user must be able to read `pages/`. publish-worker writes it with `0755` for
+The proxy's user must be able to read `sites/`. publish-worker writes it with `0755` for
 directories and `0644` for files.
 
 ## 5. Start the stack

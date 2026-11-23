@@ -7,5 +7,5 @@ It renders to `getting-started/index.html`.
 2. `POST /static-sites` at the API on port 8080.
 3. Watch `q.builds` in the management UI on port 15672.
 
-The rendered site lands under `PAGES_DIR/<slug>` and is served read-only on
+The rendered site lands under `SITES_DIR/<slug>` and is served read-only on
 port 8081.

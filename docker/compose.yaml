@@ -94,7 +94,7 @@ services:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-publish}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/publish?serverVersion=${POSTGRES_VERSION:-18}&charset=utf8"
     volumes:
       - builds:/publish-worker/var/builds
-      - ./pages:/publish-worker/var/pages
+      - ./sites:/publish-worker/var/sites
       - ./logs/publish-worker:/publish-worker/var/log
     depends_on:
       rabbitmq:

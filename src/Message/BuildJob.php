@@ -14,7 +14,7 @@ namespace App\Message;
  *                         null for a delete, which builds nothing.
  * @param string $static_site_id Identifies the site across builds, as a lower-case UUID v7.
  * @param BuildOperation $operation What publish-worker does with the site.
- * @param string $slug Names the published site directory under PAGES_DIR which translates to the uri path of the published site.
+ * @param string $slug Names the published site directory under SITES_DIR which translates to the uri path of the published site.
  *                     It is restricted to [A-Za-z0-9_-]{1,128} and StaticSiteController rejects anything else with a 400.
  *                     It is unique across sites: StaticSiteController answers 409 for a slug another site holds.
  * @param string $callback_status_url Callback url to update the build status.

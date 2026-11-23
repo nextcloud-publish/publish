@@ -101,4 +101,4 @@ a Sentry or GlitchTip project. Without them, nothing is sent.
 | Nextcloud gets `503` | publish: `Could not enqueue build`; the exception names the cause | Check `docker compose ps`; for a refused login, hash `RABBITMQ_PASSWORD` into `rabbitmq/definitions.json` again |
 | A site is not published | publish-worker: `Build failed`; the exception names the cause | e.g. Nextcloud refused the download |
 | Nextcloud never hears back | publish-worker: `Could not report failed build` | publish-worker must reach the `callback_status_url` Nextcloud sends |
-| Visitors get `403` on `/pages/` | the host proxy's error log | The proxy's user must be able to read `pages/` and every folder above it |
+| Visitors get `403` on `/sites/` | the host proxy's error log | The proxy's user must be able to read `sites/` and every folder above it |

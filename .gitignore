@@ -19,7 +19,7 @@
 ###> docker production sample ###
 /docker/.env
 /docker/rabbitmq/definitions.json
-/docker/pages/
+/docker/sites/
 /docker/logs/
 ###< docker production sample ###
 
