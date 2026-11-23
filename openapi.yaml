@@ -152,6 +152,62 @@ paths:
                 '5XX':
                   description: Retried, so the whole build runs again.
 
+  /static-sites/slug-available:
+    post:
+      tags: [Static sites]
+      operationId: checkSlugAvailable
+      summary: Check whether a slug is free
+      description: |
+        A slug is free when no stored site holds it, whatever that site's status. The answer can
+        be outdated by the time of the create, which then answers `409 slug already taken`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  type: object
+                  required: [slug]
+                  properties:
+                    slug:
+                      $ref: '#/components/schemas/StaticSiteRequest/properties/slug'
+      responses:
+        '200':
+          description: Whether the slug is free.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [available]
+                    properties:
+                      available:
+                        type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          description: The database could not be reached.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [error_message]
+                    properties:
+                      error_message:
+                        enum: ['could not check slug']
+
   /static-sites/{id}:
     parameters:
       - name: id

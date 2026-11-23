@@ -971,4 +971,101 @@ final class StaticSiteControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(401);
     }
+
+    // --- slug check ---------------------------------------------------------
+
+    public function testASlugNoSiteHoldsIsAvailable(): void
+    {
+        $client = static::createClient();
+
+        $client->jsonRequest('POST', '/static-sites/slug-available', ['data' => ['slug' => 'some_collective']], self::AUTH);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['data' => ['available' => true]], json_decode((string) $client->getResponse()->getContent(), true));
+    }
+
+    /**
+     * Provides every status a stored site can have.
+     *
+     * @return array<string, array{StaticSiteStatus}> the status, keyed by its value
+     */
+    public static function provideStatuses(): array
+    {
+        $cases = [];
+        foreach (StaticSiteStatus::cases() as $status) {
+            $cases[$status->value] = [$status];
+        }
+
+        return $cases;
+    }
+
+    /** A create with the slug would be a 409 whatever the status of the site holding it. */
+    #[DataProvider('provideStatuses')]
+    public function testASlugAStoredSiteHoldsIsNotAvailable(StaticSiteStatus $status): void
+    {
+        $client = static::createClient();
+        self::givenAStoredSite($client, $status);
+
+        $client->jsonRequest('POST', '/static-sites/slug-available', ['data' => ['slug' => self::PAYLOAD['slug']]], self::AUTH);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['data' => ['available' => false]], json_decode((string) $client->getResponse()->getContent(), true));
+    }
+
+    /**
+     * Provides slug check payloads without a valid slug.
+     *
+     * @return array<string, array{array<string, mixed>}> the payload, keyed by what is wrong with it
+     */
+    public static function provideInvalidSlugChecks(): array
+    {
+        return [
+            'no slug' => [[]],
+            'a parent directory' => [['slug' => '../x']],
+            'an empty slug' => [['slug' => '']],
+            'a number' => [['slug' => 123]],
+        ];
+    }
+
+    /**
+     * An unchecked slug would otherwise be reported as available.
+     *
+     * @param array<string, mixed> $payload The request fields.
+     */
+    #[DataProvider('provideInvalidSlugChecks')]
+    public function testASlugCheckWithoutAValidSlugIsABadRequest(array $payload): void
+    {
+        $client = static::createClient();
+
+        $client->jsonRequest('POST', '/static-sites/slug-available', ['data' => $payload], self::AUTH);
+
+        self::assertResponseStatusCodeSame(400);
+    }
+
+    public function testASlugCheckWithoutATokenIsUnauthorized(): void
+    {
+        $client = static::createClient();
+
+        $client->jsonRequest('POST', '/static-sites/slug-available', ['data' => ['slug' => 'some_collective']]);
+
+        self::assertResponseStatusCodeSame(401);
+    }
+
+    public function testASlugCheckWithoutTheDatabaseIsAServiceError(): void
+    {
+        $entityManager = $this->createStub(EntityManagerInterface::class);
+        $entityManager->method('getRepository')->willThrowException(new \RuntimeException('connection refused'));
+        $controller = new StaticSiteController($this->createStub(MessageBusInterface::class), new NullLogger(), $entityManager, 600);
+
+        $request = Request::create(
+            '/static-sites/slug-available',
+            'POST',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['data' => ['slug' => 'some_collective']], JSON_THROW_ON_ERROR),
+        );
+        $response = $controller->slugAvailable($request);
+
+        self::assertSame(503, $response->getStatusCode());
+        self::assertSame(['data' => ['error_message' => 'could not check slug']], json_decode((string) $response->getContent(), true));
+    }
 }

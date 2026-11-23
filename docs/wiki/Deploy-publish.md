@@ -118,7 +118,7 @@ server {
   }
 
   # Only the endpoints of publish; scans such as /wp-admin never reach the app
-  location ~ ^(/health|/auth-verification|/static-sites)$ {
+  location ~ ^(/health|/auth-verification|/static-sites(/[A-Za-z0-9-]+)?)$ {
     proxy_pass http://127.0.0.1:8080;
   }
 

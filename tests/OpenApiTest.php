@@ -301,4 +301,23 @@ final class OpenApiTest extends WebTestCase
         self::assertSame(202, $client->getResponse()->getStatusCode());
         $this->assertAnswerMatchesSpec($client->getResponse(), strtolower($method), '/static-sites/{id}');
     }
+
+    public function testTheSlugCheckAnswersMatchTheSpec(): void
+    {
+        $client = static::createClient();
+        $check = ['data' => ['slug' => self::PAYLOAD['slug']]];
+
+        $client->jsonRequest('POST', '/static-sites/slug-available', $check, self::AUTH);
+        self::assertSame(200, $client->getResponse()->getStatusCode());
+        $this->assertAnswerMatchesSpec($client->getResponse(), 'post', '/static-sites/slug-available');
+
+        $client->jsonRequest('POST', '/static-sites', ['data' => self::PAYLOAD], self::AUTH);
+        $client->jsonRequest('POST', '/static-sites/slug-available', $check, self::AUTH);
+        self::assertSame('{"data":{"available":false}}', $client->getResponse()->getContent());
+        $this->assertAnswerMatchesSpec($client->getResponse(), 'post', '/static-sites/slug-available');
+
+        $client->jsonRequest('POST', '/static-sites/slug-available', ['data' => ['slug' => '../x']], self::AUTH);
+        self::assertSame(400, $client->getResponse()->getStatusCode());
+        $this->assertAnswerMatchesSpec($client->getResponse(), 'post', '/static-sites/slug-available');
+    }
 }

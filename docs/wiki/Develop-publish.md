@@ -106,6 +106,15 @@ curl -sS -X DELETE localhost:8080/static-sites/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6
 The update rebuilds the site under its slug; the delete removes it and reports `deleted`. A second
 request while the first is pending answers `409`.
 
+Whether a slug is free, before a create:
+
+```bash
+curl -sS -X POST localhost:8080/static-sites/slug-available \
+  -H 'Authorization: Bearer dev-api-token-0123456789' \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"slug":"demo-site"}}'
+```
+
 If the site or the callback doesn't show up, follow the build in the logs, see
 [Logs and debugging](#logs-and-debugging). publish-worker adds `build_id`, `static_site_id`, `slug` and
 `attempt` to every line it logs for a build, and publish logs the same ids with `Build enqueued`.

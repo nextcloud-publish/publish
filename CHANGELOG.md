@@ -23,6 +23,8 @@ Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.en
   operation is pending; an update also when its `build_id` is not newer than the stored one. Needs
   a publish-worker release that handles `operation` and a delete without `build_id`; Nextcloud has
   to accept the new `deleted` callback status.
+- `POST /static-sites/slug-available` answers `{"data": {"available": true|false}}`: whether no
+  stored site holds the `slug`, so Collectives can check one before a create.
 - `PENDING_TIMEOUT_SECONDS` (default `600`): after that long in `pending`, a site takes a new
   update or delete.
 - `static_site.updated_at`, the time publish last wrote the entry, added by a migration.
@@ -36,7 +38,7 @@ Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.en
   `static_site` entry (status `pending`, the id of the queued build) together with enqueueing the
   build, and answers `409` when the `static_site_id` is already stored or another site holds the
   `slug`. A failed enqueue stores nothing. A host nginx that lists the endpoints needs
-  `/static-sites` instead of `/build`, as `Deploy-publish` in the wiki shows.
+  `/static-sites` and the paths below it instead of `/build`, as `Deploy-publish` in the wiki shows.
 - **Breaking:** the fields of `POST /static-sites` travel under `data`, as `{"data": {...}}`.
 - **Breaking:** a `202` has no body, and every `400`, `404`, `409` and `503` of the
   `/static-sites` endpoints answers `{"data": {"error_message": "..."}}` instead of

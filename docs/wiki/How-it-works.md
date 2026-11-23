@@ -48,6 +48,13 @@ publish checks every field of a build request; the
 check them again and uses `static_site_id`, `slug` and `build_id` as directory names, so publish
 is the only check.
 
+## Slug check
+
+`POST /static-sites/slug-available` with `{"data": {"slug": "..."}}` answers
+`{"data": {"available": true}}` when no stored site holds the slug, whatever that site's status, and
+`false` otherwise. It stores and queues nothing, so a create can still answer `409` when another
+site took the slug in between.
+
 ## The build message
 
 | Request | Operation | Fields under `data` |

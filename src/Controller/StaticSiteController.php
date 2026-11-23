@@ -22,6 +22,7 @@ use Symfony\Component\Uid\UuidV7;
 
 /**
  * Creates, updates and deletes static sites: validates the request, writes the StaticSite and enqueues a BuildJob for publish-worker.
+ * Also answers whether a slug is free, so the client can offer one for a create.
  * The entry is committed before the job is dispatched, so publish-worker never looks for an entry that is not there yet.
  * A failed dispatch undoes the write. The security firewall authenticates every request before this controller is resolved.
  *
@@ -231,6 +232,36 @@ final class StaticSiteController
         $site->startOperation();
 
         return $this->enqueue($build, $site, $logContext);
+    }
+
+    /**
+     * Answers whether no stored site holds a slug, whatever that site's status.
+     * The answer can be outdated by the time of a create, which then answers 409.
+     * Answers 400 for an invalid slug and 503 when the database cannot be reached.
+     *
+     * @param Request $request The POST /static-sites/slug-available request.
+     * @return JsonResponse `{"data": {"available": bool}}`, or the error
+     */
+    #[Route('/static-sites/slug-available', name: 'static_site_slug_available', methods: ['POST'])]
+    public function slugAvailable(Request $request): JsonResponse
+    {
+        try {
+            $payload = $this->payload($request);
+            $this->requireFields($payload, ['slug']);
+            $slug = $this->validateSafeId($payload['slug'], 'slug');
+        } catch (\InvalidArgumentException $e) {
+            $this->logger->warning('Slug check rejected', ['reason' => $e->getMessage()]);
+            return new JsonResponse(['data' => ['error_message' => $e->getMessage()]], Response::HTTP_BAD_REQUEST);
+        }
+
+        try {
+            $site = $this->entityManager->getRepository(StaticSite::class)->findOneBy(['slug' => $slug]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Could not check slug', ['slug' => $slug, 'exception' => $e]);
+            return new JsonResponse(['data' => ['error_message' => 'could not check slug']], Response::HTTP_SERVICE_UNAVAILABLE);
+        }
+
+        return new JsonResponse(['data' => ['available' => $site === null]]);
     }
 
     // --- enqueueing --------------------------------------------------------
