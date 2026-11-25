@@ -423,7 +423,7 @@ components:
             Any JSON value, passed unchecked to ssg-library, which validates it; see its
             [render options](https://github.com/nextcloud-publish/ssg-library#render-options).
             An invalid value is not a `400`: the build ends with a `failed` callback.
-          examples: [{ theme: colorful }]
+          examples: [{ theme: topnav }]
 
     StaticSiteUpdateRequest:
       type: object
