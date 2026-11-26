@@ -56,6 +56,11 @@ it under `/sites/` with `PUBLISH_BASE_URL` to match, as `Deploy-publish` in the 
   `/publish-worker/var/sites`, and the sample serves them at `/sites/`; in the dev stack
   `docker/dev/sites/`. Needs the publish-worker release that reads `SITES_DIR`.
 
+### Security
+
+- Symfony 8.1.12, which fixes the advisories composer audit reports for 8.1.11 in the packages
+  the API uses.
+
 ## [0.5.0] - 2026-11-15
 
 The sample's Compose project is `publish`, its nginx service `nginx-fpm-gateway`, and the worker
