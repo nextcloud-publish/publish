@@ -10,7 +10,7 @@ use Symfony\Component\Security\Core\Exception\BadCredentialsException;
 
 /**
  * Covers App\Security\ApiTokenHandler.
- * Only the token comparison is tested here; HeaderAccessTokenExtractor parses the header, so those cases are in BuildControllerTest.
+ * Only the token comparison is tested here; HeaderAccessTokenExtractor parses the header, so those cases are in StaticSiteControllerTest.
  */
 final class ApiTokenHandlerTest extends TestCase
 {

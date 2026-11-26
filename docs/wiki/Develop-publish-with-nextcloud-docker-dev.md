@@ -7,7 +7,7 @@ goes through publish and publish-worker, and publish-worker downloads the conten
 the build status back to it.
 
 `collectives-api-mock` still serves the published sites on `http://127.0.0.1:8081/`, as the host
-proxy does at `/pages/` in a deployment.
+proxy does at `/sites/` in a deployment.
 
 Both stacks join the external network `collectives-dev`, created once with
 `docker network create collectives-dev`. Either stack can start first:

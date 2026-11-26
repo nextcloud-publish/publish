@@ -8,13 +8,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.env`, generated as
-`.env.example` describes.
+`.env.example` describes. Stop the stack, rename `pages/` to `sites/`, and point the host proxy at
+it under `/sites/` with `PUBLISH_BASE_URL` to match, as `Deploy-publish` in the wiki shows.
 
 ### Added
 
 - A `postgres` service in `docker/compose.yaml`, with the `postgres-data` volume. `POSTGRES_USER`
   and `POSTGRES_VERSION` in `.env` set its user and major version.
 - The `publish` container applies pending database migrations when it starts.
+- The `static_site` table, created by the first migration: one entry per site with its id, a
+  unique slug, a status and the id of its last build.
+- `PATCH /static-sites/{id}` rebuilds a site from new content under its `slug`, and
+  `DELETE /static-sites/{id}` removes it. An update takes a new `build_id`, a delete only the
+  `callback_status_url`. Both answer `404` for an unknown id and `409` while the site's last
+  operation is pending; an update also when its `build_id` is not newer than the stored one. Needs
+  a publish-worker release that handles `operation` and a delete without `build_id`; Nextcloud has
+  to accept the new `deleted` callback status.
+- `POST /static-sites/slug-available` answers `{"data": {"available": true|false}}`: whether no
+  stored site holds the `slug`, so Collectives can check one before a create.
+- `PENDING_TIMEOUT_SECONDS` (default `600`): after that long in `pending`, a site takes a new
+  update or delete.
+- `static_site.updated_at`, the time publish last wrote the entry, added by a migration.
+- `publish-worker` gets `DATABASE_URL` in `docker/compose.yaml` and waits for `postgres`: it
+  sets `static_site.status` to `published` after a build, or removes the published site and
+  deletes the entry when the build fails for good. Needs a publish-worker release that reads it.
+
+### Changed
+
+- **Breaking:** `POST /build` becomes `POST /static-sites` and creates the site: it stores a
+  `static_site` entry (status `pending`, the id of the queued build) together with enqueueing the
+  build, and answers `409` when the `static_site_id` is already stored or another site holds the
+  `slug`. A failed enqueue stores nothing. A host nginx that lists the endpoints needs
+  `/static-sites` and the paths below it instead of `/build`, as `Deploy-publish` in the wiki shows.
+- **Breaking:** the fields of `POST /static-sites` travel under `data`, as `{"data": {...}}`.
+- **Breaking:** a `202` has no body, and every `400`, `404`, `409` and `503` of the
+  `/static-sites` endpoints answers `{"data": {"error_message": "..."}}` instead of
+  `{"status": "...", "error": "..."}`.
+- **Breaking:** the client sends `static_site_id` and `build_id`, both UUIDv7, `400` otherwise;
+  publish no longer generates the `build_id`. Both are stored and enqueued in lower case.
+- **Breaking:** every `BuildJob` carries `operation` (`create`, `update` or `delete`); a delete has
+  no `title` and no `content_download_url`. Needs the publish-worker release that requires it.
+- publish commits the `static_site` entry before it dispatches the build, so publish-worker
+  always finds it; a failed dispatch undoes the write and answers `503`.
+- **Breaking:** a site's `publish_url` is `<PUBLISH_BASE_URL>/<slug>/`, without the
+  `static_site_id`. Needs a publish-worker release that publishes sites at `SITES_DIR/<slug>/`.
+- **Breaking:** the published sites are in `sites/` instead of `pages/`, mounted at
+  `/publish-worker/var/sites`, and the sample serves them at `/sites/`; in the dev stack
+  `docker/dev/sites/`. Needs the publish-worker release that reads `SITES_DIR`.
+
+### Security
+
+- Symfony 8.1.12, which fixes the advisories composer audit reports for 8.1.11 in the packages
+  the API uses.
 
 ## [0.5.0] - 2026-11-15
 

@@ -93,8 +93,8 @@ jobs:
       - name: Install dependencies
         uses: ramsey/composer-install@v4
 
-      # The recipe's dbname_suffix makes this publish_test. --allow-no-migration keeps the
-      # step green while migrations/ is still empty.
+      # The recipe's dbname_suffix makes this publish_test. The tests in tests/Entity/ need its
+      # schema, so every migration is applied before PHPUnit runs.
       - name: Prepare test database
         run: |
           php bin/console doctrine:database:create --env=test --if-not-exists

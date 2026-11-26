@@ -3,9 +3,9 @@
 ```text
 compose.yaml             dev stack: publish, RabbitMQ, two publish-workers, collectives-api-mock
 .env.example             sample for .env: host ids, TZ
-collectives-api-mock/    nginx: content archives and status callbacks on :8082, pages/ on :8081
+collectives-api-mock/    nginx: content archives and status callbacks on :8082, sites/ on :8081
 rabbitmq/                broker config and definitions for dev
-pages/                   published sites, written by publish-worker
+sites/                   published sites, written by publish-worker
 builds/                  running builds
 ```
 

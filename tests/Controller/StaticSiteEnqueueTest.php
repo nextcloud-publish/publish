@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Tests\Controller;
 
-use App\Controller\BuildController;
+use App\Controller\StaticSiteController;
 use App\Message\BuildJob;
+use App\Message\BuildOperation;
+use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Handler\TestHandler;
 use Monolog\Level;
 use Monolog\Logger;
@@ -20,17 +22,18 @@ use Symfony\Component\Uid\Uuid;
 use Symfony\Component\Uid\UuidV7;
 
 /**
- * Covers the dispatch path of App\Controller\BuildController without a kernel.
+ * Covers the dispatch path of App\Controller\StaticSiteController without a kernel or a database.
  * The controller does not extend AbstractController, so it is constructed directly with a mocked bus.
- * A directly constructed controller never passes the security firewall, so the 401 cases are in BuildControllerTest.
+ * A directly constructed controller never passes the security firewall, so the 401 cases are in StaticSiteControllerTest.
  */
-final class BuildEnqueueTest extends TestCase
+final class StaticSiteEnqueueTest extends TestCase
 {
     /** A complete, valid build request payload. */
     private const PAYLOAD = [
-        'static_site_id' => '1234-5678',
-        'content_download_url' => 'https://cloud.example.com/collectives/publish/1234-5678',
-        'callback_status_url' => 'https://cloud.example.com/collectives/publish/1234-5678',
+        'static_site_id' => '0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'build_id' => '0199a1b2-3c4d-7e5f-8a9b-0c1d2e3f4a5b',
+        'content_download_url' => 'https://cloud.example.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
+        'callback_status_url' => 'https://cloud.example.com/collectives/publish/0192f3c4-7b1e-7a3e-9f4c-2d5e8a1b6c70',
         'slug' => 'some_collective',
         'title' => 'Some Collective',
     ];
@@ -44,7 +47,7 @@ final class BuildEnqueueTest extends TestCase
     }
 
     /**
-     * Builds a POST /build request with $payload as its JSON body.
+     * Builds a POST /static-sites request with $payload as its JSON body.
      *
      * @param array<string, mixed> $payload The request body.
      * @return Request the request
@@ -52,10 +55,10 @@ final class BuildEnqueueTest extends TestCase
     private static function request(array $payload): Request
     {
         return Request::create(
-            '/build',
+            '/static-sites',
             'POST',
             server: ['CONTENT_TYPE' => 'application/json'],
-            content: (string) json_encode($payload),
+            content: (string) json_encode(['data' => $payload]),
         );
     }
 
@@ -63,11 +66,25 @@ final class BuildEnqueueTest extends TestCase
      * Builds the controller under test.
      *
      * @param MessageBusInterface $bus The bus the controller dispatches to.
-     * @return BuildController the controller, logging into $this->logged
+     * @return StaticSiteController the controller, logging into $this->logged
      */
-    private function controller(MessageBusInterface $bus): BuildController
+    private function controller(MessageBusInterface $bus): StaticSiteController
     {
-        return new BuildController($bus, new Logger('app', [$this->logged]));
+        return new StaticSiteController($bus, new Logger('app', [$this->logged]), self::emptyEntityManager(), 600);
+    }
+
+    /**
+     * Returns an entity manager that finds no site and stores nothing.
+     * The database part is covered through the kernel in StaticSiteControllerTest.
+     *
+     * @return EntityManagerInterface the stub
+     */
+    public static function emptyEntityManager(): EntityManagerInterface
+    {
+        $entityManager = self::createStub(EntityManagerInterface::class);
+        $entityManager->method('find')->willReturn(null);
+
+        return $entityManager;
     }
 
     public function testDispatchesBuildJobAndReturns202(): void
@@ -77,12 +94,14 @@ final class BuildEnqueueTest extends TestCase
             ->method('dispatch')
             ->with($this->callback(function (BuildJob $build): bool {
                 self::assertSame(self::PAYLOAD['static_site_id'], $build->static_site_id);
+                self::assertSame(BuildOperation::Create, $build->operation);
                 self::assertSame(self::PAYLOAD['slug'], $build->slug);
                 self::assertSame(self::PAYLOAD['content_download_url'], $build->content_download_url);
                 self::assertSame(self::PAYLOAD['callback_status_url'], $build->callback_status_url);
                 self::assertSame(self::PAYLOAD['title'], $build->title);
                 self::assertNull($build->render_options);
 
+                self::assertSame(self::PAYLOAD['build_id'], $build->build_id);
                 self::assertInstanceOf(UuidV7::class, Uuid::fromString($build->build_id));
 
                 self::assertInstanceOf(
@@ -96,13 +115,10 @@ final class BuildEnqueueTest extends TestCase
             ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
 
         $controller = $this->controller($bus);
-        $response = $controller(self::request(self::PAYLOAD));
+        $response = $controller->create(self::request(self::PAYLOAD));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
-        self::assertJsonStringEqualsJsonString(
-            '{"status":"enqueued"}',
-            (string) $response->getContent(),
-        );
+        self::assertSame('', (string) $response->getContent());
         self::assertTrue($this->logged->hasInfoThatContains('Build enqueued'));
     }
 
@@ -124,7 +140,7 @@ final class BuildEnqueueTest extends TestCase
         ];
 
         $controller = self::controller($bus);
-        $response = $controller(self::request($payload));
+        $response = $controller->create(self::request($payload));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
     }
@@ -155,7 +171,7 @@ final class BuildEnqueueTest extends TestCase
             ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
 
         $controller = self::controller($bus);
-        $response = $controller(self::request([...self::PAYLOAD, 'render_options' => $renderOptions]));
+        $response = $controller->create(self::request([...self::PAYLOAD, 'render_options' => $renderOptions]));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
     }
@@ -174,7 +190,7 @@ final class BuildEnqueueTest extends TestCase
             ->willReturnCallback(static fn (BuildJob $build): Envelope => new Envelope($build));
 
         $controller = self::controller($bus);
-        $response = $controller(self::request([...self::PAYLOAD, 'render_options' => new \stdClass()]));
+        $response = $controller->create(self::request([...self::PAYLOAD, 'render_options' => new \stdClass()]));
 
         self::assertSame(Response::HTTP_ACCEPTED, $response->getStatusCode());
     }
@@ -187,11 +203,11 @@ final class BuildEnqueueTest extends TestCase
             ->willThrowException(new TransportException('connection refused'));
 
         $controller = $this->controller($bus);
-        $response = $controller(self::request(self::PAYLOAD));
+        $response = $controller->create(self::request(self::PAYLOAD));
 
         self::assertSame(Response::HTTP_SERVICE_UNAVAILABLE, $response->getStatusCode());
         self::assertJsonStringEqualsJsonString(
-            '{"status":"error","error":"could not enqueue build"}',
+            '{"data":{"error_message":"could not enqueue build"}}',
             (string) $response->getContent(),
         );
 
@@ -213,11 +229,11 @@ final class BuildEnqueueTest extends TestCase
         unset($payload['slug']);
 
         $controller = $this->controller($bus);
-        $response = $controller(self::request($payload));
+        $response = $controller->create(self::request($payload));
 
         self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
         self::assertJsonStringEqualsJsonString(
-            '{"status":"invalid","error":"missing required fields"}',
+            '{"data":{"error_message":"missing required fields"}}',
             (string) $response->getContent(),
         );
         self::assertTrue($this->logged->hasWarningThatContains('Build request rejected'));
