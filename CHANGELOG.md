@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-26
+
 Before updating, copy the new `compose.yaml` and set `POSTGRES_PASSWORD` in `.env`, generated as
 `.env.example` describes. Stop the stack, rename `pages/` to `sites/`, and point the host proxy at
 it under `/sites/` with `PUBLISH_BASE_URL` to match, as `Deploy-publish` in the wiki shows.
@@ -22,7 +24,7 @@ it under `/sites/` with `PUBLISH_BASE_URL` to match, as `Deploy-publish` in the 
   `DELETE /static-sites/{id}` removes it. An update takes a new `build_id`, a delete only the
   `callback_status_url`. Both answer `404` for an unknown id and `409` while the site's last
   operation is pending; an update also when its `build_id` is not newer than the stored one. Needs
-  a publish-worker release that handles `operation` and a delete without `build_id`; Nextcloud has
+  publish-worker 0.7.0, which handles `operation` and a delete without `build_id`; Nextcloud has
   to accept the new `deleted` callback status.
 - `POST /static-sites/slug-available` answers `{"data": {"available": true|false}}`: whether no
   stored site holds the `slug`, so Collectives can check one before a create.
@@ -31,7 +33,7 @@ it under `/sites/` with `PUBLISH_BASE_URL` to match, as `Deploy-publish` in the 
 - `static_site.updated_at`, the time publish last wrote the entry, added by a migration.
 - `publish-worker` gets `DATABASE_URL` in `docker/compose.yaml` and waits for `postgres`: it
   sets `static_site.status` to `published` after a build, or removes the published site and
-  deletes the entry when the build fails for good. Needs a publish-worker release that reads it.
+  deletes the entry when the build fails for good. Needs publish-worker 0.7.0, which reads it.
 
 ### Changed
 
@@ -47,14 +49,14 @@ it under `/sites/` with `PUBLISH_BASE_URL` to match, as `Deploy-publish` in the 
 - **Breaking:** the client sends `static_site_id` and `build_id`, both UUIDv7, `400` otherwise;
   publish no longer generates the `build_id`. Both are stored and enqueued in lower case.
 - **Breaking:** every `BuildJob` carries `operation` (`create`, `update` or `delete`); a delete has
-  no `title` and no `content_download_url`. Needs the publish-worker release that requires it.
+  no `title` and no `content_download_url`. Needs publish-worker 0.7.0, which requires it.
 - publish commits the `static_site` entry before it dispatches the build, so publish-worker
   always finds it; a failed dispatch undoes the write and answers `503`.
 - **Breaking:** a site's `publish_url` is `<PUBLISH_BASE_URL>/<slug>/`, without the
-  `static_site_id`. Needs a publish-worker release that publishes sites at `SITES_DIR/<slug>/`.
+  `static_site_id`. Needs publish-worker 0.7.0, which publishes sites at `SITES_DIR/<slug>/`.
 - **Breaking:** the published sites are in `sites/` instead of `pages/`, mounted at
   `/publish-worker/var/sites`, and the sample serves them at `/sites/`; in the dev stack
-  `docker/dev/sites/`. Needs the publish-worker release that reads `SITES_DIR`.
+  `docker/dev/sites/`. Needs publish-worker 0.7.0, which reads `SITES_DIR`.
 
 ### Security
 
@@ -178,7 +180,8 @@ compose file needs publish-worker 0.6.0, which reads `BUILDS_DIR` and `PAGES_DIR
   GHCR.
 - Pre-commit hooks that run the CI lint and test steps.
 
-[Unreleased]: https://github.com/nextcloud-publish/publish/compare/0.5.0...HEAD
+[Unreleased]: https://github.com/nextcloud-publish/publish/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.6.0
 [0.5.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.5.0
 [0.4.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.4.0
 [0.3.0]: https://github.com/nextcloud-publish/publish/releases/tag/0.3.0
