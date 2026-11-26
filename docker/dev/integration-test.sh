@@ -6,14 +6,14 @@
 #   docker/dev/integration-test.sh --fresh    first wipe and rebuild the dev stack
 #
 # --fresh deletes the dev stack's database, queues, docker/dev/sites/ and docker/dev/builds/.
-# Run from the publish checkout. DOCKER defaults to "sudo docker"; set DOCKER=docker if your
-# user may talk to Docker directly.
+# Run from the publish checkout. DOCKER defaults to "docker"; set DOCKER="sudo docker" if your
+# user is not in the docker group.
 
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
 
-DOCKER=${DOCKER:-sudo docker}
+DOCKER=${DOCKER:-docker}
 COMPOSE="$DOCKER compose -f docker/dev/compose.yaml"
 API=http://localhost:8080
 SITES=http://127.0.0.1:8081
